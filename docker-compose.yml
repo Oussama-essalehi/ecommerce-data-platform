@@ -18,6 +18,14 @@ x-simulator: &simulator
     - ./data/landing:/data/landing
     - producer-state:/state
 
+# How containers reach the PostgreSQL warehouse (inside the Docker network).
+x-warehouse-env: &warehouse-env
+  WAREHOUSE_HOST: warehouse
+  WAREHOUSE_PORT: "5432"
+  WAREHOUSE_DB: warehouse
+  WAREHOUSE_USER: warehouse
+  WAREHOUSE_PASSWORD: ${WAREHOUSE_PASSWORD:-warehouse}
+
 # Settings shared by the containers that run the Spark jobs.
 x-pipelines: &pipelines
   build: ./pipelines
@@ -29,6 +37,7 @@ x-pipelines: &pipelines
     KAFKA_BOOTSTRAP_SERVERS: kafka:19092
     KAFKA_TOPIC: shop.orders.v1
     SPARK_DRIVER_MEMORY: ${SPARK_DRIVER_MEMORY:-2g}
+    <<: *warehouse-env
   volumes:
     - ./data/landing:/data/landing
     - ./data/lake:/data/lake
@@ -142,7 +151,44 @@ services:
     depends_on:
       shop-api:
         condition: service_healthy
+      warehouse:
+        condition: service_healthy
+
+  # The data warehouse. From your machine: localhost:5432, database
+  # "warehouse", user "warehouse" (password "warehouse" unless changed in .env).
+  #   docker compose exec warehouse psql -U warehouse -d warehouse
+  warehouse:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: warehouse
+      POSTGRES_USER: warehouse
+      POSTGRES_PASSWORD: ${WAREHOUSE_PASSWORD:-warehouse}
+    ports:
+      - "${WAREHOUSE_HOST_PORT:-5432}:5432"
+    volumes:
+      - warehouse-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U warehouse -d warehouse"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  # dbt, which builds the star schema inside the warehouse:
+  #   docker compose run --rm dbt build
+  dbt:
+    build: ./warehouse
+    image: ecommerce-data-platform/dbt:local
+    profiles: ["cli"]
+    environment:
+      <<: *warehouse-env
+    volumes:
+      - ./warehouse:/usr/app
+    depends_on:
+      warehouse:
+        condition: service_healthy
 
 volumes:
   kafka-data:
   producer-state:
+  warehouse-data:

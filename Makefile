@@ -1,10 +1,10 @@
-up: ## Build and start Kafka, the API, the event producer and the bronze stream
+up: ## Build and start Kafka, the API, the event producer, the bronze stream and the warehouse
 	docker compose up -d --build
 
 down: ## Stop everything, keep the data
 	docker compose down
 
-reset: ## Stop everything and delete Kafka data, checkpoints, the lake and generated files
+reset: ## Stop everything and delete Kafka data, checkpoints, the lake, the warehouse and generated files
 	docker compose down -v
 	rm -rf data/landing data/lake
 
@@ -26,6 +26,15 @@ gold: ## Rebuild the gold tables (business view) from silver
 
 lake: bronze silver gold ## Run bronze, silver and gold in order
 
+warehouse: ## Load gold into PostgreSQL, then build and test the star schema with dbt
+	docker compose run --rm spark warehouse-load
+	docker compose run --rm dbt build
+
+all: lake warehouse ## Run the whole pipeline, from the sources to the marts
+
+psql: ## Open a SQL prompt on the warehouse
+	docker compose exec warehouse psql -U warehouse -d warehouse
+
 status: ## Row counts and key figures of every layer
 	docker compose run --rm spark status
 
@@ -38,5 +47,5 @@ test: ## Run the Spark job tests inside the pipelines image
 help:
 	@grep -E "^[a-z]+:.*##" Makefile | sed "s/:.*## /\t/"
 
-.PHONY: up down reset csv summary bronze silver gold lake status logs test help
+.PHONY: up down reset csv summary bronze silver gold lake warehouse all psql status logs test help
 .DEFAULT_GOAL := help

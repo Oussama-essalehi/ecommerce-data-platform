@@ -11,6 +11,7 @@ from helpers import (
     events_bronze,
     export_row,
     item,
+    load_sample_bronze,
     marketplace_bronze,
     product_ids,
     product_record,
@@ -142,26 +143,9 @@ def test_gold_reference_tables_hold_the_current_version_only(spark):
 # --- the jobs, against real Delta tables ------------------------------------------------
 
 
-def _load_bronze(spark, config):
-    lake.append(api_bronze(spark, "customers", [customer_record(42)]),
-                config.table("bronze", "customers"))
-    lake.append(api_bronze(spark, "products", [product_record(7), product_record(11)]),
-                config.table("bronze", "products"))
-    lake.append(marketplace_bronze(spark, [
-        export_row(), export_row(),                         # duplicate row
-        export_row(ligne="2", ref_produit="P9999"),         # unknown product
-    ]), config.table("bronze", "marketplace_orders"))
-    paid = status_event(WEB, "paid", "2026-10-06T08:03:10.000Z")
-    lake.append(events_bronze(spark, [
-        created_event(items=[item(1, "P0007", 1, 49.9), item(2, "P0011", 2, 19.9)]),
-        paid, paid,                                         # delivered twice
-        '{"event_id": "broken',                             # truncated
-    ]), config.table("bronze", "order_events"))
-
-
 @pytest.mark.delta
 def test_silver_then_gold_from_bronze_and_rerun_gives_the_same_result(spark, config):
-    _load_bronze(spark, config)
+    load_sample_bronze(spark, config)
 
     silver = silver_job.run(spark, config)
     assert silver["rows"] == {

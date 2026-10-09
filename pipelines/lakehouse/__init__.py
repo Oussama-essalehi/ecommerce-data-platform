@@ -1,3 +1,3 @@
 """lakehouse: Spark jobs that move data through the bronze, silver and gold layers."""
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"

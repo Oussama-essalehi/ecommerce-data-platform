@@ -7,7 +7,7 @@ warehouse that feeds dashboards and demand-forecasting features.
 
 **Stack:** Python · Kafka · Spark · Delta Lake · Airflow · dbt · PostgreSQL · Great Expectations · Docker
 
-> **Status:** phases 1 to 3 of 7 are done (source systems, Kafka, and the bronze, silver and gold layers). See the [roadmap](#roadmap).
+> **Status:** phases 1 to 4 of 7 are done (source systems, Kafka, the data lake and the warehouse). See the [roadmap](#roadmap).
 
 ## Architecture
 
@@ -46,7 +46,7 @@ flowchart LR
 | 1 | **Sources and streaming backbone** | Three simulated source systems (REST API, daily CSV exports, order events), Kafka, Docker Compose, tests, CI | ✅ |
 | 2 | **Bronze ingestion** | Spark batch jobs for the API and the CSV files, Spark Structured Streaming for Kafka, all landing raw in Delta tables | ✅ |
 | 3 | **Silver and gold** | Typing, deduplication, late and broken events, the two order sources merged into one model; business tables in gold | ✅ |
-| 4 | **Warehouse** | PostgreSQL star schema with dbt: sales fact, customer, product and date dimensions, data marts | ⬜ |
+| 4 | **Warehouse** | PostgreSQL star schema with dbt: sales fact, customer, product and date dimensions, data marts | ✅ |
 | 5 | **Data quality** | Great Expectations suites and dbt tests for completeness, uniqueness and freshness, with an anomaly log | ⬜ |
 | 6 | **Orchestration** | Airflow DAGs for the daily batch, with retries and failure alerts | ⬜ |
 | 7 | **Serving and documentation** | Power BI dashboard, demand-forecast feature table, dbt docs and lineage | ⬜ |
@@ -70,8 +70,12 @@ docker compose run --rm spark bronze-marketplace --all
 docker compose run --rm spark silver
 docker compose run --rm spark gold
 
-# 5. See what each layer holds
+# 5. See what each layer of the lake holds
 docker compose run --rm spark status
+
+# 6. Load gold into the warehouse, then build and test the star schema
+docker compose run --rm spark warehouse-load
+docker compose run --rm dbt build
 ```
 
 Order events need no command for bronze: the `bronze-events` container reads
@@ -87,6 +91,7 @@ Then look around:
 | Spark UI of the streaming query | http://localhost:4040 |
 | Marketplace CSV files | `data/landing/marketplace/` |
 | Delta tables | `data/lake/bronze/`, `silver/`, `gold/` |
+| Warehouse (PostgreSQL) | `localhost:5432`, database, user and password `warehouse` |
 | Producer progress | `docker compose logs -f order-producer` |
 
 On its first start the producer replays the whole history into Kafka (a
@@ -320,6 +325,133 @@ Business rules applied in gold:
   and 42.42 here. A gap above one cent per line would mean a line was
   rejected.
 
+## The warehouse
+
+The warehouse is a PostgreSQL database modelled with [dbt](https://www.getdbt.com/),
+in [`warehouse/`](warehouse/). It is where analysts and dashboards connect.
+
+```bash
+docker compose run --rm spark warehouse-load   # copy gold into PostgreSQL
+docker compose run --rm dbt build              # build and test every model
+docker compose exec warehouse psql -U warehouse -d warehouse   # SQL prompt
+```
+
+### Layers
+
+Each layer is a PostgreSQL schema:
+
+| Schema | Built by | Content |
+| :-- | :-- | :-- |
+| `lake` | Spark job | The four gold tables, copied as they are |
+| `reference` | dbt seeds | Hand-maintained tables: French public holidays, sales events |
+| `staging` | dbt, views | One view per source table, with settled column names |
+| `core` | dbt, tables | The star schema |
+| `marts` | dbt, tables | Tables shaped for one use each |
+
+### Star schema
+
+```mermaid
+erDiagram
+    dim_date ||--o{ fct_sales : "order_date_key"
+    dim_customers ||--o{ fct_sales : "customer_key"
+    dim_products ||--o{ fct_sales : "product_key"
+    dim_date ||--o{ fct_orders : "order_date_key"
+    dim_customers ||--o{ fct_orders : "customer_key"
+
+    fct_sales {
+        text sale_key PK
+        text order_id
+        int order_date_key FK
+        text customer_key FK
+        text product_key FK
+        text channel
+        int quantity
+        numeric net_amount
+        int units_sold
+        numeric net_sales_amount
+    }
+    fct_orders {
+        text order_id PK
+        int order_date_key FK
+        text customer_key FK
+        text order_status
+        numeric shipping_fee
+        numeric total_amount
+        numeric hours_to_ship
+        numeric days_to_deliver
+        numeric billed_amount
+    }
+    dim_date {
+        int date_key PK
+        date date_day
+        boolean is_weekend
+        boolean is_public_holiday
+        text sales_event
+    }
+    dim_customers {
+        text customer_key PK
+        text customer_id
+        text city
+        text department_code
+        date signup_date
+    }
+    dim_products {
+        text product_key PK
+        text product_id
+        text category
+        text brand
+        boolean is_active
+    }
+```
+
+Two fact tables share the dimensions. `fct_sales` has one row per product
+sold in an order and answers what sold, to whom and when. `fct_orders` has
+one row per order and holds what only exists at that level: shipping, totals
+and the time from order to shipment and delivery.
+
+Modelling choices:
+
+- **Surrogate keys are hashes of the business key.** A given customer always
+  gets the same key, so a dimension can be rebuilt without rebuilding the
+  facts that point to it.
+- **Each dimension has an "Unknown" member.** A sale whose customer is
+  missing points to it instead of holding an empty key, so joining a fact to
+  a dimension never drops rows.
+- **Cancelled orders stay in the facts** with zero in `units_sold`,
+  `net_sales_amount` and `billed_amount`. Sales measures add up correctly
+  without a filter, and cancellations remain available for analysis.
+- **The date dimension knows the French calendar**: public holidays, Black
+  Friday week, winter and summer sales. It extends 90 days past the last
+  order so forecasts can be joined to it.
+
+### Marts
+
+| Mart | One row per | For |
+| :-- | :-- | :-- |
+| `mart_daily_sales` | Day, channel and category | The sales dashboard |
+| `mart_customers` | Customer | Purchase history, recency, segment (No purchase, One-time, Repeat, Loyal) |
+| `mart_product_demand_features` | Product and day | Training a demand-forecasting model |
+
+The demand table is built to be safe to train on: days without sales are
+present with zero units, every past-demand feature (lags, 7 and 28-day
+averages) stops at the day before, and the current, incomplete day is left
+out.
+
+### Loading
+
+`warehouse-load` streams each gold table into PostgreSQL through `COPY`, its
+bulk-loading path. The four tables are replaced in a single transaction, so
+a query never sees orders without their lines, and a load that fails leaves
+the previous one in place. Each row carries a `_loaded_at` timestamp.
+
+### Tests
+
+`dbt build` runs 55 tests along with the models: keys are unique and filled,
+every fact row finds its dimensions, statuses and channels hold known
+values. Four of them are reconciliations written for this project, for
+instance that `fct_sales` accounts for every order line of the lake to the
+cent, and that the demand table keeps every unit sold.
+
 ## Data defects, injected on purpose
 
 Clean sources would leave nothing for the quality checks to do. The simulator
@@ -362,15 +494,19 @@ Copy `.env.example` to `.env` to change the defaults.
 | `SIM_DEFECT_RATE` | `1.0` | Multiplier on every injected defect |
 | `SIM_API_ERROR_RATE` | `0.02` | Share of API calls answered with 503 |
 | `SPARK_DRIVER_MEMORY` | `2g` | Memory given to each Spark job |
+| `WAREHOUSE_PASSWORD` | `warehouse` | Password of the warehouse database |
+| `WAREHOUSE_HOST_PORT` | `5432` | Port of the warehouse on your machine; change it if another PostgreSQL already uses 5432 |
 
 ## Tests
 
-Both packages have their own test suite, run on every push with GitHub
-Actions.
+Each part has its own tests, all run on every push with GitHub Actions.
 
 ```bash
-# Spark jobs: file parsing, API retries, idempotent loads, cleaning rules, gold amounts
+# Spark jobs: parsing, API retries, idempotent loads, cleaning rules, amounts, warehouse load
 docker compose run --rm --no-deps --entrypoint python spark -m pytest
+
+# Warehouse: dbt builds every model and runs its tests
+docker compose run --rm dbt build
 
 # Simulator: determinism, referential integrity, amounts, pagination, checkpointing
 cd sources
@@ -378,11 +514,15 @@ pip install -r requirements-dev.txt
 python -m pytest
 ```
 
+The tests of the warehouse load need a PostgreSQL and are skipped when none
+is reachable. They write to a schema of their own, so they can run against
+the project's warehouse without touching its data.
+
 ## Repository layout
 
 ```
 .
-├── docker-compose.yml        Kafka, Kafka UI, Shop API, event producer, bronze stream
+├── docker-compose.yml        Kafka, Kafka UI, Shop API, event producer, bronze stream, warehouse
 ├── sources/
 │   ├── shop_sim/             The simulated source systems
 │   │   ├── world.py          Customers and products, with their history
@@ -410,7 +550,17 @@ python -m pytest
 │   │   ├── gold/
 │   │   │   ├── build.py          Orders, order lines, customers, products
 │   │   │   └── job.py            Rebuilds gold
+│   │   ├── warehouse.py      Gold -> PostgreSQL, with COPY
 │   │   └── status.py         Row counts and key figures of every layer
 │   └── tests/
+├── warehouse/                The dbt project
+│   ├── models/
+│   │   ├── staging/          One view per table loaded from the lake
+│   │   ├── core/             Star schema: dim_date, dim_customers, dim_products, fct_sales, fct_orders
+│   │   └── marts/            Daily sales, customers, demand features
+│   ├── seeds/                Public holidays and sales events
+│   ├── tests/                Reconciliation tests
+│   ├── macros/               Surrogate keys, schema naming
+│   └── ci/                   Sample data used by CI
 └── data/                     Generated files and the lake, not versioned
 ```

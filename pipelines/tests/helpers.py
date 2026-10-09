@@ -17,6 +17,7 @@ from pyspark.sql.types import (
     TimestampType,
 )
 
+from lakehouse import lake
 from lakehouse.bronze.api import ENTITIES
 from lakehouse.bronze.marketplace import SOURCE_COLUMNS
 
@@ -209,3 +210,30 @@ def api_bronze(spark: SparkSession, entity: str, records: list[dict],
 
 def product_ids(spark: SparkSession, *ids: str) -> DataFrame:
     return spark.createDataFrame([(i,) for i in ids], "product_id string")
+
+
+# --- a small but complete bronze layer --------------------------------------------------
+
+
+def load_sample_bronze(spark: SparkSession, config) -> None:
+    """Write the four bronze tables with a handful of rows, defects included.
+
+    Gives one web shop order (2 lines, paid) and one marketplace order
+    (1 valid line), plus a duplicate row, an unknown product, a re-delivered
+    event and a truncated payload for silver to deal with.
+    """
+    web_order = "WEB-20261006-00001"
+    lake.append(api_bronze(spark, "customers", [customer_record(42)]),
+                config.table("bronze", "customers"))
+    lake.append(api_bronze(spark, "products", [product_record(7), product_record(11)]),
+                config.table("bronze", "products"))
+    lake.append(marketplace_bronze(spark, [
+        export_row(), export_row(),                         # duplicate row
+        export_row(ligne="2", ref_produit="P9999"),         # unknown product
+    ]), config.table("bronze", "marketplace_orders"))
+    paid = status_event(web_order, "paid", "2026-10-06T08:03:10.000Z")
+    lake.append(events_bronze(spark, [
+        created_event(web_order, items=[item(1, "P0007", 1, 49.9), item(2, "P0011", 2, 19.9)]),
+        paid, paid,                                         # delivered twice
+        '{"event_id": "broken',                             # truncated
+    ]), config.table("bronze", "order_events"))

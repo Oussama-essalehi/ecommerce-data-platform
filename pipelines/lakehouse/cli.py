@@ -92,6 +92,18 @@ def cmd_gold(args: argparse.Namespace, config: Config) -> int:
     return 0
 
 
+def cmd_warehouse_load(args: argparse.Namespace, config: Config) -> int:
+    from . import warehouse
+
+    spark = build_session("warehouse-load", config)
+    try:
+        _print(warehouse.run(spark, config))
+    except warehouse.MissingGoldError as error:
+        logging.getLogger("lakehouse").error("%s", error)
+        return 1
+    return 0
+
+
 def cmd_status(args: argparse.Namespace, config: Config) -> int:
     from . import status
 
@@ -155,6 +167,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     gold = commands.add_parser("gold", help="rebuild the gold tables from silver")
     gold.set_defaults(handler=cmd_gold)
+
+    load = commands.add_parser(
+        "warehouse-load", help="copy the gold tables into the PostgreSQL warehouse"
+    )
+    load.set_defaults(handler=cmd_warehouse_load)
 
     status = commands.add_parser("status", help="row counts and key figures of the lake tables")
     status.add_argument("--layer", choices=["all", "bronze", "silver", "gold"], default="all")

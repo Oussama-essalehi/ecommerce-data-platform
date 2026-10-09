@@ -22,6 +22,12 @@ class Config:
     # the transformations work in that mode; it exists for machines that
     # cannot reach Maven Central.
     offline: bool = False
+    # The PostgreSQL data warehouse that gold is loaded into.
+    warehouse_host: str = "localhost"
+    warehouse_port: int = 5432
+    warehouse_db: str = "warehouse"
+    warehouse_user: str = "warehouse"
+    warehouse_password: str = "warehouse"
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -37,6 +43,11 @@ class Config:
             driver_memory=env.get("SPARK_DRIVER_MEMORY", default.driver_memory),
             ivy_dir=env.get("LAKEHOUSE_IVY_DIR") or None,
             offline=env.get("LAKEHOUSE_OFFLINE", "") not in ("", "0", "false"),
+            warehouse_host=env.get("WAREHOUSE_HOST", default.warehouse_host),
+            warehouse_port=int(env.get("WAREHOUSE_PORT", default.warehouse_port)),
+            warehouse_db=env.get("WAREHOUSE_DB", default.warehouse_db),
+            warehouse_user=env.get("WAREHOUSE_USER", default.warehouse_user),
+            warehouse_password=env.get("WAREHOUSE_PASSWORD", default.warehouse_password),
         )
 
     def table(self, layer: str, name: str) -> str:
