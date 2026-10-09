@@ -33,6 +33,7 @@ x-pipelines: &pipelines
   environment:
     LAKE_ROOT: /data/lake
     LANDING_ROOT: /data/landing
+    QUALITY_ROOT: /data/quality
     SHOP_API_URL: http://shop-api:8000
     KAFKA_BOOTSTRAP_SERVERS: kafka:19092
     KAFKA_TOPIC: shop.orders.v1
@@ -41,6 +42,7 @@ x-pipelines: &pipelines
   volumes:
     - ./data/landing:/data/landing
     - ./data/lake:/data/lake
+    - ./data/quality:/data/quality
 
 services:
   # Single-node Kafka in KRaft mode (no ZooKeeper).
@@ -144,6 +146,7 @@ services:
   # One-off Spark jobs, e.g.:
   #   docker compose run --rm spark bronze-api
   #   docker compose run --rm spark bronze-marketplace --all
+  #   docker compose run --rm spark quality
   #   docker compose run --rm spark status
   spark:
     <<: *pipelines

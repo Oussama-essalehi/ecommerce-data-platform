@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import sys
+
 import pyspark
 from pyspark.sql import SparkSession
 
@@ -14,6 +17,10 @@ def kafka_package() -> str:
 
 
 def build_session(app_name: str, config: Config) -> SparkSession:
+    # Python workers must run the same interpreter as the driver. Without
+    # this, Spark picks whatever `python3` is first on the PATH, which in a
+    # virtual environment may be another version.
+    os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
     builder = (
         SparkSession.builder.appName(app_name)
         .master(config.spark_master)

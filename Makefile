@@ -6,7 +6,7 @@ down: ## Stop everything, keep the data
 
 reset: ## Stop everything and delete Kafka data, checkpoints, the lake, the warehouse and generated files
 	docker compose down -v
-	rm -rf data/landing data/lake
+	rm -rf data/landing data/lake data/quality
 
 csv: ## Write the marketplace CSV exports up to yesterday
 	docker compose run --rm simulator export-csv
@@ -26,11 +26,15 @@ gold: ## Rebuild the gold tables (business view) from silver
 
 lake: bronze silver gold ## Run bronze, silver and gold in order
 
+quality: ## Run the data-quality checks on the lake (stops here if a check is in error)
+	docker compose run --rm spark quality
+
 warehouse: ## Load gold into PostgreSQL, then build and test the star schema with dbt
 	docker compose run --rm spark warehouse-load
 	docker compose run --rm dbt build
+	docker compose run --rm dbt source freshness
 
-all: lake warehouse ## Run the whole pipeline, from the sources to the marts
+all: lake quality warehouse ## Run the whole pipeline, from the sources to the marts
 
 psql: ## Open a SQL prompt on the warehouse
 	docker compose exec warehouse psql -U warehouse -d warehouse
@@ -47,5 +51,5 @@ test: ## Run the Spark job tests inside the pipelines image
 help:
 	@grep -E "^[a-z]+:.*##" Makefile | sed "s/:.*## /\t/"
 
-.PHONY: up down reset csv summary bronze silver gold lake warehouse all psql status logs test help
+.PHONY: up down reset csv summary bronze silver gold lake quality warehouse all psql status logs test help
 .DEFAULT_GOAL := help

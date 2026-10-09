@@ -6,14 +6,16 @@ RUN mkdir -p /usr/share/man/man1 \
     && apt-get install -y --no-install-recommends openjdk-17-jre-headless procps \
     && rm -rf /var/lib/apt/lists/*
 
+# GX_ANALYTICS_ENABLED=false: Great Expectations sends no usage statistics.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    LAKEHOUSE_IVY_DIR=/opt/ivy
+    LAKEHOUSE_IVY_DIR=/opt/ivy \
+    GX_ANALYTICS_ENABLED=false
 
 WORKDIR /app
 
-COPY requirements.txt requirements-dev.txt ./
-RUN pip install --no-cache-dir -r requirements-dev.txt
+COPY requirements.txt requirements-dev.txt constraints.txt ./
+RUN pip install --no-cache-dir -r requirements-dev.txt -c constraints.txt
 
 # Download the Delta Lake and Kafka connector jars at build time, so jobs do
 # not fetch them on every start. Only the three files the session needs are

@@ -3,10 +3,17 @@ version: 2
 sources:
   - name: lake
     description: >
-      The gold layer of the data lake, copied as-is into PostgreSQL by the
-      `warehouse-load` Spark job. Everything dbt builds starts here.
+      The gold layer of the data lake and the history of its quality checks,
+      copied as-is into PostgreSQL by the `warehouse-load` Spark job.
+      Everything dbt builds starts here.
     schema: lake
-    loaded_at_field: _loaded_at
+    config:
+      # `dbt source freshness` reads this column to tell how old the last
+      # load is: a warning after a missed daily load, an error after two.
+      loaded_at_field: _loaded_at
+      freshness:
+        warn_after: {count: 26, period: hour}
+        error_after: {count: 50, period: hour}
     tables:
       - name: orders
         description: One row per order, marketplace and web shop together.
@@ -28,3 +35,15 @@ sources:
         columns:
           - name: product_id
             data_tests: [unique, not_null]
+      - name: quality_check_results
+        description: >
+          One row per data-quality check and per run of the quality job on
+          the lake. Empty until that job has run once.
+        config:
+          freshness: null
+      - name: quality_reject_history
+        description: >
+          Number of records rejected by the silver layer, per source and
+          reason, at each run of the quality job.
+        config:
+          freshness: null

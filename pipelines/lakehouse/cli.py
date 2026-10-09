@@ -92,6 +92,16 @@ def cmd_gold(args: argparse.Namespace, config: Config) -> int:
     return 0
 
 
+def cmd_quality(args: argparse.Namespace, config: Config) -> int:
+    from .quality import runner
+
+    spark = build_session("quality", config)
+    summary = runner.run(spark, config, build_docs=not args.no_report)
+    _print(summary)
+    # Errors fail the job so that whatever runs next (the warehouse load) does not.
+    return 1 if summary["failed"] else 0
+
+
 def cmd_warehouse_load(args: argparse.Namespace, config: Config) -> int:
     from . import warehouse
 
@@ -168,13 +178,21 @@ def build_parser() -> argparse.ArgumentParser:
     gold = commands.add_parser("gold", help="rebuild the gold tables from silver")
     gold.set_defaults(handler=cmd_gold)
 
+    quality = commands.add_parser(
+        "quality", help="run the data-quality checks on the lake (fails if a check is in error)"
+    )
+    quality.add_argument("--no-report", action="store_true",
+                         help="skip the HTML report (faster)")
+    quality.set_defaults(handler=cmd_quality)
+
     load = commands.add_parser(
         "warehouse-load", help="copy the gold tables into the PostgreSQL warehouse"
     )
     load.set_defaults(handler=cmd_warehouse_load)
 
     status = commands.add_parser("status", help="row counts and key figures of the lake tables")
-    status.add_argument("--layer", choices=["all", "bronze", "silver", "gold"], default="all")
+    status.add_argument("--layer", choices=["all", "bronze", "silver", "gold", "quality"],
+                        default="all")
     status.add_argument("--json", action="store_true")
     status.set_defaults(handler=cmd_status)
 
@@ -191,5 +209,12 @@ def main(argv: list[str] | None = None) -> int:
         stream=sys.stderr,
     )
     logging.getLogger("py4j").setLevel(logging.WARNING)
+    # Great Expectations is chatty at INFO level, and names some of its
+    # loggers after file paths: filter on the name rather than set levels.
+    for handler in logging.getLogger().handlers:
+        handler.addFilter(
+            lambda record: record.levelno >= logging.WARNING
+            or "great_expectations" not in record.name
+        )
     args = build_parser().parse_args(argv)
     return args.handler(args, Config.from_env())

@@ -1,0 +1,19 @@
+select
+    run_id,
+    checked_at,
+    layer,
+    table_name,
+    check_name,
+    dimension,
+    severity,
+    description,
+    expectation,
+    column_name,
+    success,
+    status,
+    element_count,
+    unexpected_count,
+    unexpected_percent,
+    observed_value,
+    sample
+from {{ source('lake', 'quality_check_results') }}

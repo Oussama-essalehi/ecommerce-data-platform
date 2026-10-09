@@ -5,11 +5,16 @@ from __future__ import annotations
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
-from . import bronze, gold, lake, silver
+from . import bronze, gold, lake, quality, silver
 from .config import Config
 
-LAYERS = ["bronze", "silver", "gold"]
-TABLES = {"bronze": bronze.TABLES, "silver": silver.TABLES, "gold": gold.TABLES}
+LAYERS = ["bronze", "silver", "gold", "quality"]
+TABLES = {
+    "bronze": bronze.TABLES,
+    "silver": silver.TABLES,
+    "gold": gold.TABLES,
+    "quality": quality.TABLES,
+}
 
 # Per table: (label, aggregate expression) pairs shown next to the row count.
 DETAILS = {
@@ -46,6 +51,13 @@ DETAILS = {
         ("total amount", "sum(total_amount)"),
     ],
     "gold.order_lines": [("units sold", "sum(quantity)")],
+    "quality.check_results": [
+        ("runs", "count(DISTINCT run_id)"),
+        ("last run", "max(checked_at)"),
+        ("failed checks, all runs", "count_if(status = 'failed')"),
+        ("warnings, all runs", "count_if(status = 'warning')"),
+    ],
+    "quality.reject_history": [("runs", "count(DISTINCT run_id)")],
 }
 
 

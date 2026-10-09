@@ -30,6 +30,23 @@ models:
       - name: customer_id
         description: The customer's identifier in the shop's back-office.
         data_tests: [unique, not_null]
+      - name: email
+        description: Lower-cased email address. Empty when the source value was not a valid address.
+        data_tests:
+          - not_null_proportion:
+              arguments:
+                at_least: 0.99
+              config:
+                where: "customer_id != 'UNKNOWN'"
+                severity: warn
+      - name: postal_code
+        data_tests:
+          - not_null_proportion:
+              arguments:
+                at_least: 0.98
+              config:
+                where: "customer_id != 'UNKNOWN'"
+                severity: warn
       - name: department_code
         description: French département, the first two digits of the postal code.
 
@@ -88,10 +105,29 @@ models:
                 values: [marketplace, web, mobile]
       - name: quantity
         description: Units ordered on the line.
+        data_tests:
+          - accepted_range:
+              arguments:
+                min_value: 1
+      - name: unit_price
+        data_tests:
+          - accepted_range:
+              arguments:
+                min_value: 0
+      - name: discount_pct
+        data_tests:
+          - accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 100
       - name: gross_amount
         description: Quantity times unit price, before discount.
       - name: net_amount
         description: Gross amount after the line discount. Excludes shipping.
+        data_tests:
+          - accepted_range:
+              arguments:
+                min_value: 0
       - name: units_sold
         description: Quantity, counted as zero when the order was cancelled.
       - name: net_sales_amount
@@ -125,7 +161,26 @@ models:
                 values: [created, paid, shipped, delivered, cancelled, returned]
       - name: hours_to_ship
         description: Hours between the order and its shipment. Empty until shipped.
+        data_tests:
+          - accepted_range:
+              arguments:
+                min_value: 0
       - name: days_to_deliver
         description: Days between the order and its delivery. Empty until delivered.
+        data_tests:
+          - accepted_range:
+              arguments:
+                min_value: 0
+      - name: shipping_fee
+        data_tests:
+          - accepted_range:
+              arguments:
+                min_value: 0
+      - name: total_amount
+        description: Net amount of the lines plus shipping.
+        data_tests:
+          - accepted_range:
+              arguments:
+                min_value: 0
       - name: billed_amount
         description: Net amount plus shipping, counted as zero when the order was cancelled.

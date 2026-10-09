@@ -1,13 +1,14 @@
 """Batch job: copy the gold tables into the PostgreSQL data warehouse.
 
 The four gold tables land, unchanged, in the `lake` schema of the
-warehouse. dbt takes it from there and builds the star schema.
+warehouse, along with the history of data-quality results. dbt takes it
+from there and builds the star schema.
 
 How the load works:
 
 - Rows go through PostgreSQL's COPY protocol, its bulk-loading path: far
   faster than INSERT statements.
-- The four tables are replaced inside a single transaction. Anyone
+- All tables are replaced inside a single transaction. Anyone
   querying the warehouse sees either the previous load or the new one,
   never orders without their lines.
 - Tables are emptied with TRUNCATE rather than dropped, so the dbt views
@@ -42,11 +43,20 @@ from pyspark.sql.types import (
 from . import lake
 from .config import Config
 from .gold import TABLES
+from .quality import CHECK_RESULTS_SCHEMA, REJECT_HISTORY_SCHEMA
 
 log = logging.getLogger(__name__)
 
 SCHEMA = "lake"
 LOADED_AT = "_loaded_at"
+
+# Quality tables are loaded under a prefixed name, next to the gold tables.
+# They may not exist yet (the quality job has never run): an empty table
+# with the right columns is then created, so dbt always finds its sources.
+QUALITY_TABLES = {
+    "quality_check_results": ("check_results", CHECK_RESULTS_SCHEMA),
+    "quality_reject_history": ("reject_history", REJECT_HISTORY_SCHEMA),
+}
 
 
 class MissingGoldError(RuntimeError):
@@ -193,13 +203,19 @@ def run(spark: SparkSession, config: Config, schema: str = SCHEMA) -> dict:
         cursor.execute(
             sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(schema))
         )
-        for table in TABLES:
-            df = lake.read(spark, config.table("gold", table))
+        sources = {table: lake.read(spark, config.table("gold", table)) for table in TABLES}
+        for target, (table, ddl) in QUALITY_TABLES.items():
+            path = config.table("quality", table)
+            sources[target] = (
+                lake.read(spark, path) if lake.exists(spark, path)
+                else spark.createDataFrame([], ddl)
+            )
+        for table, df in sources.items():
             action = prepare_table(cursor, schema, table, columns_of(df.schema))
             rows = copy_rows(cursor, schema, table, df)
             tables[table] = {"rows": rows, "action": action}
             log.info("%s.%s: %d rows loaded (%s)", schema, table, rows, action)
-        for table in TABLES:
+        for table in sources:
             # Refresh the planner's statistics for the queries dbt runs next.
             cursor.execute(sql.SQL("ANALYZE {}").format(sql.Identifier(schema, table)))
 

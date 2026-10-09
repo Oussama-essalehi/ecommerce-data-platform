@@ -4,6 +4,10 @@ models:
   - name: mart_daily_sales
     description: >
       Sales per day, channel and product category, for the sales dashboard.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [date_day, channel, category]
     columns:
       - name: date_day
         data_tests: [not_null]
@@ -51,3 +55,45 @@ models:
         description: Average daily units over the 28 days before date_day.
       - name: days_on_sale
         description: Days the product had been on sale before date_day.
+
+  - name: mart_data_quality
+    description: >
+      One row per quality check and per run of the quality job on the lake:
+      the history behind a data-quality dashboard.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [run_id, layer, table_name, check_name]
+    columns:
+      - name: status
+        description: >
+          passed, warning (the check failed but does not block the pipeline)
+          or failed (it does).
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [passed, warning, failed]
+      - name: dimension
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [completeness, uniqueness, validity, consistency, freshness, volume]
+      - name: is_latest_run
+        description: True for the rows of the most recent run.
+      - name: is_problem
+        description: True when the check did not pass, whatever its severity.
+
+  - name: mart_reject_history
+    description: >
+      Records rejected by the silver layer, per source and reason, at each
+      quality run, with the change since the previous run.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [run_id, source, reason]
+    columns:
+      - name: rejected
+        data_tests:
+          - accepted_range:
+              arguments:
+                min_value: 0

@@ -37,3 +37,15 @@ seeds:
     public_holidays:
       +column_types:
         holiday_date: date
+
+# Tests written for this project keep the rows that fail them, in tables of
+# the `test_failures` schema: when a reconciliation breaks, the offending
+# orders are there to look at, not just a count in a log.
+data_tests:
+  ecommerce:
+    reconciliation:
+      +store_failures: true
+      +schema: test_failures
+    monitoring:
+      +store_failures: true
+      +schema: test_failures

@@ -42,7 +42,10 @@ def spark():
 def config(tmp_path) -> Config:
     """A lake and a landing zone of their own for each test."""
     return dataclasses.replace(
-        ENV, lake_root=tmp_path / "lake", landing_root=tmp_path / "landing"
+        ENV,
+        lake_root=tmp_path / "lake",
+        landing_root=tmp_path / "landing",
+        quality_root=tmp_path / "quality",
     )
 
 

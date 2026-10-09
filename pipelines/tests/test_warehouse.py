@@ -123,6 +123,9 @@ def test_gold_tables_arrive_complete_and_typed(spark, config, schema, gold):
         "order_lines": {"rows": 3, "action": "created"},
         "customers": {"rows": 1, "action": "created"},
         "products": {"rows": 2, "action": "created"},
+        # The quality job has not run: its tables are created empty.
+        "quality_check_results": {"rows": 0, "action": "created"},
+        "quality_reject_history": {"rows": 0, "action": "created"},
     }
 
     (order,) = _query(config, """

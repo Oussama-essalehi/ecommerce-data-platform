@@ -11,6 +11,8 @@ from pathlib import Path
 class Config:
     lake_root: Path = Path("data/lake")
     landing_root: Path = Path("data/landing")
+    # Where the data-quality reports (Great Expectations) are written.
+    quality_root: Path = Path("data/quality")
     api_url: str = "http://localhost:8000"
     kafka_bootstrap: str = "localhost:9092"
     kafka_topic: str = "shop.orders.v1"
@@ -36,6 +38,7 @@ class Config:
         return cls(
             lake_root=Path(env.get("LAKE_ROOT", default.lake_root)),
             landing_root=Path(env.get("LANDING_ROOT", default.landing_root)),
+            quality_root=Path(env.get("QUALITY_ROOT", default.quality_root)),
             api_url=env.get("SHOP_API_URL", default.api_url),
             kafka_bootstrap=env.get("KAFKA_BOOTSTRAP_SERVERS", default.kafka_bootstrap),
             kafka_topic=env.get("KAFKA_TOPIC", default.kafka_topic),

@@ -7,7 +7,7 @@ warehouse that feeds dashboards and demand-forecasting features.
 
 **Stack:** Python · Kafka · Spark · Delta Lake · Airflow · dbt · PostgreSQL · Great Expectations · Docker
 
-> **Status:** phases 1 to 4 of 7 are done (source systems, Kafka, the data lake and the warehouse). See the [roadmap](#roadmap).
+> **Status:** phases 1 to 5 of 7 are done (source systems, Kafka, the data lake, the warehouse and data quality). See the [roadmap](#roadmap).
 
 ## Architecture
 
@@ -47,7 +47,7 @@ flowchart LR
 | 2 | **Bronze ingestion** | Spark batch jobs for the API and the CSV files, Spark Structured Streaming for Kafka, all landing raw in Delta tables | ✅ |
 | 3 | **Silver and gold** | Typing, deduplication, late and broken events, the two order sources merged into one model; business tables in gold | ✅ |
 | 4 | **Warehouse** | PostgreSQL star schema with dbt: sales fact, customer, product and date dimensions, data marts | ✅ |
-| 5 | **Data quality** | Great Expectations suites and dbt tests for completeness, uniqueness and freshness, with an anomaly log | ⬜ |
+| 5 | **Data quality** | Great Expectations suites and dbt tests for completeness, uniqueness and freshness, with an anomaly log | ✅ |
 | 6 | **Orchestration** | Airflow DAGs for the daily batch, with retries and failure alerts | ⬜ |
 | 7 | **Serving and documentation** | Power BI dashboard, demand-forecast feature table, dbt docs and lineage | ⬜ |
 
@@ -73,7 +73,10 @@ docker compose run --rm spark gold
 # 5. See what each layer of the lake holds
 docker compose run --rm spark status
 
-# 6. Load gold into the warehouse, then build and test the star schema
+# 6. Check the quality of the lake. Stops with an error if the data is wrong
+docker compose run --rm spark quality
+
+# 7. Load gold into the warehouse, then build and test the star schema
 docker compose run --rm spark warehouse-load
 docker compose run --rm dbt build
 ```
@@ -92,6 +95,7 @@ Then look around:
 | Marketplace CSV files | `data/landing/marketplace/` |
 | Delta tables | `data/lake/bronze/`, `silver/`, `gold/` |
 | Warehouse (PostgreSQL) | `localhost:5432`, database, user and password `warehouse` |
+| Data-quality report | `data/quality/gx/uncommitted/data_docs/local_site/index.html` |
 | Producer progress | `docker compose logs -f order-producer` |
 
 On its first start the producer replays the whole history into Kafka (a
@@ -342,7 +346,7 @@ Each layer is a PostgreSQL schema:
 
 | Schema | Built by | Content |
 | :-- | :-- | :-- |
-| `lake` | Spark job | The four gold tables, copied as they are |
+| `lake` | Spark job | The four gold tables and the quality history, copied as they are |
 | `reference` | dbt seeds | Hand-maintained tables: French public holidays, sales events |
 | `staging` | dbt, views | One view per source table, with settled column names |
 | `core` | dbt, tables | The star schema |
@@ -431,6 +435,8 @@ Modelling choices:
 | `mart_daily_sales` | Day, channel and category | The sales dashboard |
 | `mart_customers` | Customer | Purchase history, recency, segment (No purchase, One-time, Repeat, Loyal) |
 | `mart_product_demand_features` | Product and day | Training a demand-forecasting model |
+| `mart_data_quality` | Quality check and run | Following the quality checks over time |
+| `mart_reject_history` | Rejection reason and run | Following rejected records over time |
 
 The demand table is built to be safe to train on: days without sales are
 present with zero units, every past-demand feature (lags, 7 and 28-day
@@ -440,17 +446,65 @@ out.
 ### Loading
 
 `warehouse-load` streams each gold table into PostgreSQL through `COPY`, its
-bulk-loading path. The four tables are replaced in a single transaction, so
-a query never sees orders without their lines, and a load that fails leaves
-the previous one in place. Each row carries a `_loaded_at` timestamp.
+bulk-loading path, along with the history of quality results. All tables
+are replaced in a single transaction, so a query never sees orders without
+their lines, and a load that fails leaves the previous one in place. Each
+row carries a `_loaded_at` timestamp.
 
-### Tests
+## Data quality
 
-`dbt build` runs 55 tests along with the models: keys are unique and filled,
-every fact row finds its dimensions, statuses and channels hold known
-values. Four of them are reconciliations written for this project, for
-instance that `fct_sales` accounts for every order line of the lake to the
-cent, and that the demand table keeps every unit sold.
+Quality is checked in two places, with the tool that fits each: Great
+Expectations on the lake, before anything reaches the warehouse, and dbt
+tests inside the warehouse.
+
+```bash
+docker compose run --rm spark quality          # 88 checks on the lake
+docker compose run --rm dbt build              # models and 77 tests in the warehouse
+docker compose run --rm dbt source freshness   # is the warehouse load recent?
+```
+
+### What is checked
+
+| Dimension | Question | On the lake (Great Expectations) | In the warehouse (dbt) |
+| :-- | :-- | :-- | :-- |
+| Completeness | Are required values there? | Keys never empty; at least 99% of orders have a customer | Keys never empty; at least 99% of customers have an email |
+| Uniqueness | Any duplicates? | One row per order, per order line, per event; one current version per customer | Unique keys in every dimension and fact; one row per day, channel and category in the sales mart |
+| Validity | Are values plausible? | Known statuses and channels, positive quantities, discounts between 0 and 100, well-formed emails and postal codes | Same ranges on the facts; no order dated in the future |
+| Consistency | Do values agree with each other? | Total equals net plus shipping; computed total matches the shop's declared total; every line has its order and its product; shipped after ordered | Every fact row finds its dimensions; facts and marts sum to the same amounts as the lake |
+| Freshness | Is the data recent? | An event ingested in the last hour, yesterday's export loaded, orders from today or yesterday | Warehouse loaded in the last 26 hours; a recent order in the facts |
+| Volume | Is the amount of data normal? | Tables are not empty; no source has more than 1% of its rows rejected | Share of orders without a known customer under 1% |
+
+### Errors and warnings
+
+Every check has a severity, and the two behave differently:
+
+- **Error**: the data is wrong (a duplicated order, a total that does not
+  add up). `spark quality` exits with a failure, which stops the pipeline
+  before the warehouse is loaded: bad data stays in the lake.
+- **Warning**: something to look at, but the data is usable (a few more
+  missing emails than usual, a source that is late). The run continues.
+
+Freshness checks are warnings on purpose. Refusing to publish data because
+it is stale would only make it staler.
+
+### Following anomalies over time
+
+A check that passes today tells little; a check that starts drifting tells a
+lot. So every result is kept, not just the failures:
+
+- `quality.check_results` in the lake receives one row per check at each
+  run, with what was observed (the number of offending rows, their share,
+  a few examples).
+- `quality.reject_history` receives the number of records silver rejected,
+  per source and reason. `silver.rejects` only shows the current state;
+  this is its history.
+- Both are loaded into the warehouse and exposed as `mart_data_quality` and
+  `mart_reject_history`, ready for a dashboard.
+- Great Expectations also writes an HTML report of each run, to open in a
+  browser: `data/quality/gx/uncommitted/data_docs/local_site/index.html`.
+- In the warehouse, the reconciliation tests keep the rows that fail them in
+  the `test_failures` schema: when a total stops matching, the orders at
+  fault are in a table, not just counted in a log.
 
 ## Data defects, injected on purpose
 
@@ -551,6 +605,9 @@ the project's warehouse without touching its data.
 │   │   │   ├── build.py          Orders, order lines, customers, products
 │   │   │   └── job.py            Rebuilds gold
 │   │   ├── warehouse.py      Gold -> PostgreSQL, with COPY
+│   │   ├── quality/
+│   │   │   ├── suites.py         The checks, table by table
+│   │   │   └── runner.py         Runs them, stores the results, builds the report
 │   │   └── status.py         Row counts and key figures of every layer
 │   └── tests/
 ├── warehouse/                The dbt project
@@ -559,7 +616,7 @@ the project's warehouse without touching its data.
 │   │   ├── core/             Star schema: dim_date, dim_customers, dim_products, fct_sales, fct_orders
 │   │   └── marts/            Daily sales, customers, demand features
 │   ├── seeds/                Public holidays and sales events
-│   ├── tests/                Reconciliation tests
+│   ├── tests/                Reconciliation and monitoring tests, generic tests
 │   ├── macros/               Surrogate keys, schema naming
 │   └── ci/                   Sample data used by CI
 └── data/                     Generated files and the lake, not versioned

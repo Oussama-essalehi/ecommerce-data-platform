@@ -46,9 +46,9 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: pipelines/requirements-dev.txt
+          cache-dependency-path: pipelines/constraints.txt
       - name: Install dependencies
-        run: pip install -r pipelines/requirements-dev.txt
+        run: pip install -r pipelines/requirements-dev.txt -c pipelines/constraints.txt
       - name: Run the Spark job tests (downloads the Delta Lake jars)
         working-directory: pipelines
         run: python -m pytest -q

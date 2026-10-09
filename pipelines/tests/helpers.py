@@ -233,7 +233,8 @@ def load_sample_bronze(spark: SparkSession, config) -> None:
     ]), config.table("bronze", "marketplace_orders"))
     paid = status_event(web_order, "paid", "2026-10-06T08:03:10.000Z")
     lake.append(events_bronze(spark, [
-        created_event(web_order, items=[item(1, "P0007", 1, 49.9), item(2, "P0011", 2, 19.9)]),
+        created_event(web_order, items=[item(1, "P0007", 1, 49.9), item(2, "P0011", 2, 19.9)],
+                      total_amount=94.6),
         paid, paid,                                         # delivered twice
         '{"event_id": "broken',                             # truncated
     ]), config.table("bronze", "order_events"))

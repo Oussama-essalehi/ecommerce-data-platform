@@ -9,3 +9,7 @@ models:
     description: Customers from the lake.
   - name: stg_products
     description: Products from the lake.
+  - name: stg_quality_check_results
+    description: Results of the quality checks run on the lake.
+  - name: stg_quality_reject_history
+    description: Counts of records rejected by the silver layer, per run.
