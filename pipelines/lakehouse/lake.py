@@ -33,3 +33,8 @@ def replace_where(spark: SparkSession, df: DataFrame, path: str, predicate: str)
         append(df, path)
         return
     df.write.format("delta").mode("overwrite").option("replaceWhere", predicate).save(path)
+
+
+def overwrite(df: DataFrame, path: str) -> None:
+    """Atomically replace the whole table (readers see the old or the new version, never a mix)."""
+    df.write.format("delta").mode("overwrite").option("overwriteSchema", "true").save(path)

@@ -18,7 +18,15 @@ bronze: ## Load the API and every CSV export into the bronze tables
 	docker compose run --rm spark bronze-api
 	docker compose run --rm spark bronze-marketplace --all
 
-status: ## Row counts and freshness of the bronze tables
+silver: ## Rebuild the silver tables (cleaned data) from bronze
+	docker compose run --rm spark silver
+
+gold: ## Rebuild the gold tables (business view) from silver
+	docker compose run --rm spark gold
+
+lake: bronze silver gold ## Run bronze, silver and gold in order
+
+status: ## Row counts and key figures of every layer
 	docker compose run --rm spark status
 
 logs: ## Follow the event producer
@@ -30,5 +38,5 @@ test: ## Run the Spark job tests inside the pipelines image
 help:
 	@grep -E "^[a-z]+:.*##" Makefile | sed "s/:.*## /\t/"
 
-.PHONY: up down reset csv summary bronze status logs test help
+.PHONY: up down reset csv summary bronze silver gold lake status logs test help
 .DEFAULT_GOAL := help

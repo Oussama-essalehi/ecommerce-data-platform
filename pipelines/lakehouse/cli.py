@@ -68,13 +68,38 @@ def cmd_bronze_events(args: argparse.Namespace, config: Config) -> int:
     return 0
 
 
+def cmd_silver(args: argparse.Namespace, config: Config) -> int:
+    from .silver import job
+
+    spark = build_session("silver", config)
+    try:
+        _print(job.run(spark, config))
+    except job.MissingBronzeError as error:
+        logging.getLogger("lakehouse").error("%s", error)
+        return 1
+    return 0
+
+
+def cmd_gold(args: argparse.Namespace, config: Config) -> int:
+    from .gold import job
+
+    spark = build_session("gold", config)
+    try:
+        _print(job.run(spark, config))
+    except job.MissingSilverError as error:
+        logging.getLogger("lakehouse").error("%s", error)
+        return 1
+    return 0
+
+
 def cmd_status(args: argparse.Namespace, config: Config) -> int:
     from . import status
 
     spark = build_session("status", config)
-    report = status.collect(spark, config)
+    layers = status.LAYERS if args.layer == "all" else [args.layer]
+    report = status.collect(spark, config, layers)
     if args.json:
-        _print({"bronze": report})
+        _print({"tables": report})
     else:
         print(status.render(report))
     return 0
@@ -125,7 +150,14 @@ def build_parser() -> argparse.ArgumentParser:
                         help="pause between micro-batches in continuous mode (default: 15)")
     events.set_defaults(handler=cmd_bronze_events)
 
-    status = commands.add_parser("status", help="row counts and freshness of the bronze tables")
+    silver = commands.add_parser("silver", help="rebuild the silver tables from bronze")
+    silver.set_defaults(handler=cmd_silver)
+
+    gold = commands.add_parser("gold", help="rebuild the gold tables from silver")
+    gold.set_defaults(handler=cmd_gold)
+
+    status = commands.add_parser("status", help="row counts and key figures of the lake tables")
+    status.add_argument("--layer", choices=["all", "bronze", "silver", "gold"], default="all")
     status.add_argument("--json", action="store_true")
     status.set_defaults(handler=cmd_status)
 

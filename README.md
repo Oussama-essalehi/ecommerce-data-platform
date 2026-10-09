@@ -7,7 +7,7 @@ warehouse that feeds dashboards and demand-forecasting features.
 
 **Stack:** Python · Kafka · Spark · Delta Lake · Airflow · dbt · PostgreSQL · Great Expectations · Docker
 
-> **Status:** phases 1 and 2 of 7 are done (source systems, Kafka, bronze ingestion). See the [roadmap](#roadmap).
+> **Status:** phases 1 to 3 of 7 are done (source systems, Kafka, and the bronze, silver and gold layers). See the [roadmap](#roadmap).
 
 ## Architecture
 
@@ -45,7 +45,7 @@ flowchart LR
 | - | :-- | :-- | :-: |
 | 1 | **Sources and streaming backbone** | Three simulated source systems (REST API, daily CSV exports, order events), Kafka, Docker Compose, tests, CI | ✅ |
 | 2 | **Bronze ingestion** | Spark batch jobs for the API and the CSV files, Spark Structured Streaming for Kafka, all landing raw in Delta tables | ✅ |
-| 3 | **Silver and gold** | Typing, deduplication, late and broken events, the two order sources merged into one model; business tables in gold | ⬜ |
+| 3 | **Silver and gold** | Typing, deduplication, late and broken events, the two order sources merged into one model; business tables in gold | ✅ |
 | 4 | **Warehouse** | PostgreSQL star schema with dbt: sales fact, customer, product and date dimensions, data marts | ⬜ |
 | 5 | **Data quality** | Great Expectations suites and dbt tests for completeness, uniqueness and freshness, with an anomaly log | ⬜ |
 | 6 | **Orchestration** | Airflow DAGs for the daily batch, with retries and failure alerts | ⬜ |
@@ -66,12 +66,17 @@ docker compose run --rm simulator export-csv
 docker compose run --rm spark bronze-api
 docker compose run --rm spark bronze-marketplace --all
 
-# 4. See what the bronze layer holds
+# 4. Clean the data (silver), then build the business tables (gold)
+docker compose run --rm spark silver
+docker compose run --rm spark gold
+
+# 5. See what each layer holds
 docker compose run --rm spark status
 ```
 
-Order events need no command: the `bronze-events` container reads Kafka
-continuously and writes to `bronze.order_events`.
+Order events need no command for bronze: the `bronze-events` container reads
+Kafka continuously and writes to `bronze.order_events`. Silver and gold are
+batch jobs; run them again whenever you want them to catch up with bronze.
 
 Then look around:
 
@@ -81,7 +86,7 @@ Then look around:
 | Kafka UI, topic `shop.orders.v1` | http://localhost:8085 |
 | Spark UI of the streaming query | http://localhost:4040 |
 | Marketplace CSV files | `data/landing/marketplace/` |
-| Delta tables | `data/lake/bronze/` |
+| Delta tables | `data/lake/bronze/`, `silver/`, `gold/` |
 | Producer progress | `docker compose logs -f order-producer` |
 
 On its first start the producer replays the whole history into Kafka (a
@@ -233,6 +238,88 @@ The tables are not partitioned: at this volume, partitions would only
 produce thousands of tiny files. On a real workload they would be
 partitioned by ingestion date.
 
+## The silver layer
+
+Silver is each source, cleaned: typed, standardised, deduplicated and
+validated. It is rebuilt entirely from bronze by one job,
+`docker compose run --rm spark silver`.
+
+| Table | Content |
+| :-- | :-- |
+| `customers`, `products` | Every version of each record with its validity period (`valid_from`, `valid_to`, `is_current`) |
+| `order_events` | The web shop's event log: parsed, typed, one row per event |
+| `web_order_lines` | Web shop orders, one row per order line, with current status |
+| `marketplace_order_lines` | Marketplace orders, same columns, one row per order line |
+| `rejects` | Every record silver refused, with the reason and the original content |
+
+What cleaning means here:
+
+- **Typing.** Text becomes dates, decimals, integers and booleans. The
+  marketplace's Paris local times become UTC, decimal commas become
+  decimals, French labels (`payée`, `CB`) become codes (`paid`, `card`).
+- **One row per order line.** A marketplace order appears in a new export
+  each day its status changes. Silver keeps one row per line with the
+  latest status, and records when each status was first seen (`paid_at`,
+  `shipped_at`, `delivered_at`...). For the web shop, the same result is
+  obtained by folding status events into the order.
+- **Nothing disappears silently.** A record that fails validation goes to
+  `silver.rejects` with a reason, its original content and where it came
+  from (file name, or Kafka partition and offset).
+
+How each planted defect is handled:
+
+| Defect | What silver does |
+| :-- | :-- |
+| Duplicate CSV row, event delivered twice | Removed; the run summary counts them |
+| Late or out-of-order event | Nothing to fix: statuses are ordered by when they happened, not when they arrived |
+| Truncated JSON payload | Rejected (`malformed_json`), never half-read |
+| Status event whose order was never received | Rejected (`orphan_status_event`) |
+| Status in upper case with stray spaces | Normalised, then mapped |
+| Customer id missing in one export | Recovered from the other exports of the same order; left empty if none has it |
+| Quantity of zero or negative, unknown product | That row is rejected. The line is repaired from another export of the same order when one is valid, and left out otherwise |
+| Email in the wrong case, invalid email, missing postal code | Normalised; a value that is not valid becomes empty, the customer is kept |
+| Product without category or brand, price of zero | Kept; a zero price becomes empty, and gold labels a missing category `Unknown` |
+
+Silver is a full rebuild rather than an incremental load. At this volume it
+takes a minute or two, and it means silver can never drift from bronze: when
+a cleaning rule changes, the whole history gets the new rule. On a larger
+dataset the same transformations would run incrementally with a Delta
+`MERGE` keyed on the order.
+
+Two limits worth knowing:
+
+- The marketplace export gives the status at the end of each day. A status
+  an order held for only part of a day (paid and shipped the same day, for
+  instance) is never seen, so its timestamp stays empty.
+- The export uses local time without an offset. During the hour repeated at
+  the autumn clock change (02:00 to 03:00), a time is ambiguous and is read
+  as the first occurrence.
+
+## The gold layer
+
+Gold is the business view: the two sales channels merged into one model,
+rebuilt from silver with `docker compose run --rm spark gold`.
+
+| Table | One row per | Main columns |
+| :-- | :-- | :-- |
+| `orders` | Order | Channel, customer, status and its dates, units, gross, discount, net, shipping and total amounts |
+| `order_lines` | Product in an order | Product, quantity, unit price, discount, amounts |
+| `customers` | Customer, current version | Name, email, city, sign-up date |
+| `products` | Product, current version | Name, category, brand, price, active flag |
+
+Business rules applied in gold:
+
+- **The order date is the day in France.** An order placed at 00:30 in
+  Paris belongs to that day, although it is 22:30 the day before in UTC.
+- **Amounts are computed in exact decimals**: gross is quantity times unit
+  price, net is gross after the line discount, total is net plus shipping.
+- **The declared total is kept next to the computed one.** Web shop events
+  carry the total the shop charged (`source_total_amount`). The two differ
+  by a cent or two on about 8% of web orders: the shop rounds with
+  floating-point arithmetic, so `49.90 x 0.85 = 42.415` becomes 42.41 there
+  and 42.42 here. A gap above one cent per line would mean a line was
+  rejected.
+
 ## Data defects, injected on purpose
 
 Clean sources would leave nothing for the quality checks to do. The simulator
@@ -282,7 +369,7 @@ Both packages have their own test suite, run on every push with GitHub
 Actions.
 
 ```bash
-# Spark jobs: file parsing, API client retries, idempotent loads on real Delta tables
+# Spark jobs: file parsing, API retries, idempotent loads, cleaning rules, gold amounts
 docker compose run --rm --no-deps --entrypoint python spark -m pytest
 
 # Simulator: determinism, referential integrity, amounts, pagination, checkpointing
@@ -315,7 +402,15 @@ python -m pytest
 │   │   │   ├── api.py            Shop API -> customers, products
 │   │   │   ├── marketplace.py    CSV exports -> marketplace_orders
 │   │   │   └── order_events.py   Kafka -> order_events
-│   │   └── status.py         Row counts and freshness
+│   │   ├── silver/
+│   │   │   ├── reference.py      Customers and products, with history
+│   │   │   ├── marketplace.py    Marketplace exports -> order lines
+│   │   │   ├── order_events.py   Event log -> web shop order lines
+│   │   │   └── job.py            Rebuilds silver and the rejects table
+│   │   ├── gold/
+│   │   │   ├── build.py          Orders, order lines, customers, products
+│   │   │   └── job.py            Rebuilds gold
+│   │   └── status.py         Row counts and key figures of every layer
 │   └── tests/
 └── data/                     Generated files and the lake, not versioned
 ```

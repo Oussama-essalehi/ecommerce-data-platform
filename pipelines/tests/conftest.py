@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import dataclasses
+import os
+import time
 
 import pytest
 
 from lakehouse.bronze.marketplace import SOURCE_COLUMNS
 from lakehouse.config import Config
 from lakehouse.session import build_session
+
+# PySpark hands timestamps back in the machine's local time. Pin it to UTC
+# so the tests read the same on a laptop in Paris and on a CI runner.
+os.environ["TZ"] = "UTC"
+if hasattr(time, "tzset"):
+    time.tzset()
 
 ENV = Config.from_env()
 HEADER = ";".join(SOURCE_COLUMNS)
