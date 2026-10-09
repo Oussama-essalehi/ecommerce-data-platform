@@ -1,0 +1,30 @@
+version: 2
+
+sources:
+  - name: lake
+    description: >
+      The gold layer of the data lake, copied as-is into PostgreSQL by the
+      `warehouse-load` Spark job. Everything dbt builds starts here.
+    schema: lake
+    loaded_at_field: _loaded_at
+    tables:
+      - name: orders
+        description: One row per order, marketplace and web shop together.
+        columns:
+          - name: order_id
+            data_tests: [unique, not_null]
+      - name: order_lines
+        description: One row per product sold in an order.
+        columns:
+          - name: order_id
+            data_tests: [not_null]
+      - name: customers
+        description: One row per customer, as known today.
+        columns:
+          - name: customer_id
+            data_tests: [unique, not_null]
+      - name: products
+        description: One row per product, as known today.
+        columns:
+          - name: product_id
+            data_tests: [unique, not_null]

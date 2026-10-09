@@ -1,0 +1,39 @@
+name: ecommerce
+version: "1.0.0"
+profile: ecommerce
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+# One PostgreSQL schema per layer of the warehouse:
+#   lake       gold tables, loaded as-is by the Spark job (not built by dbt)
+#   reference  small hand-maintained tables (seeds)
+#   staging    one view per source table: names and types tidied, nothing else
+#   core       the star schema: dimensions and facts
+#   marts      tables shaped for one use: a dashboard, a model's features
+models:
+  ecommerce:
+    staging:
+      +materialized: view
+      +schema: staging
+    core:
+      +materialized: table
+      +schema: core
+    marts:
+      +materialized: table
+      +schema: marts
+
+seeds:
+  ecommerce:
+    +schema: reference
+    sales_events:
+      +column_types:
+        start_date: date
+        end_date: date
+    public_holidays:
+      +column_types:
+        holiday_date: date

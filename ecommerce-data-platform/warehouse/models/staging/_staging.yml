@@ -1,0 +1,11 @@
+version: 2
+
+models:
+  - name: stg_orders
+    description: Orders from the lake, with column names settled for the warehouse.
+  - name: stg_order_lines
+    description: Order lines from the lake.
+  - name: stg_customers
+    description: Customers from the lake.
+  - name: stg_products
+    description: Products from the lake.

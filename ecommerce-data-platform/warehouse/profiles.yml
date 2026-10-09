@@ -1,0 +1,15 @@
+# Connection to the warehouse. Every value comes from the environment, so
+# the same file works in Docker, in CI and on a laptop.
+ecommerce:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('WAREHOUSE_HOST', 'localhost') }}"
+      port: "{{ env_var('WAREHOUSE_PORT', '5432') | as_number }}"
+      dbname: "{{ env_var('WAREHOUSE_DB', 'warehouse') }}"
+      user: "{{ env_var('WAREHOUSE_USER', 'warehouse') }}"
+      password: "{{ env_var('WAREHOUSE_PASSWORD', 'warehouse') }}"
+      # Only used for models without a schema of their own; there are none.
+      schema: analytics
+      threads: 4

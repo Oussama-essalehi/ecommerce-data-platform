@@ -1,0 +1,23 @@
+version: 2
+
+seeds:
+  - name: sales_events
+    description: >
+      Commercial events of the French retail calendar: Black Friday week and
+      the legally fixed winter and summer sales. Maintained by hand; add the
+      coming year's dates before it starts.
+    columns:
+      - name: event_name
+        data_tests: [not_null]
+      - name: start_date
+        data_tests: [not_null]
+      - name: end_date
+        data_tests: [not_null]
+
+  - name: public_holidays
+    description: Public holidays in metropolitan France.
+    columns:
+      - name: holiday_date
+        data_tests: [unique, not_null]
+      - name: holiday_name
+        data_tests: [not_null]

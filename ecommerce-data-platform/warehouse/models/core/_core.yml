@@ -1,0 +1,131 @@
+version: 2
+
+models:
+  - name: dim_date
+    description: >
+      Calendar dimension: one row per day, with ISO week, weekend flag, French
+      public holidays and commercial events (Black Friday, winter and summer
+      sales).
+    columns:
+      - name: date_key
+        description: The date as an integer, YYYYMMDD.
+        data_tests: [unique, not_null]
+      - name: date_day
+        data_tests: [unique, not_null]
+      - name: day_of_week
+        description: ISO day number, 1 for Monday to 7 for Sunday.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4, 5, 6, 7]
+
+  - name: dim_customers
+    description: >
+      Customer dimension: one row per customer as known today, plus an
+      "Unknown" member for orders without an identifiable customer.
+    columns:
+      - name: customer_key
+        description: Surrogate key, a hash of customer_id.
+        data_tests: [unique, not_null]
+      - name: customer_id
+        description: The customer's identifier in the shop's back-office.
+        data_tests: [unique, not_null]
+      - name: department_code
+        description: French département, the first two digits of the postal code.
+
+  - name: dim_products
+    description: >
+      Product dimension: one row per product as known today, plus an "Unknown"
+      member.
+    columns:
+      - name: product_key
+        description: Surrogate key, a hash of product_id.
+        data_tests: [unique, not_null]
+      - name: product_id
+        data_tests: [unique, not_null]
+      - name: category
+        data_tests: [not_null]
+      - name: current_unit_price
+        description: >
+          Catalogue price today. The price actually paid is on each sale in
+          fct_sales.
+
+  - name: fct_sales
+    description: >
+      Sales fact. Grain: one row per product sold in an order. Cancelled
+      orders are kept, with zero in units_sold and net_sales_amount.
+    columns:
+      - name: sale_key
+        description: Surrogate key, a hash of order_id and line_number.
+        data_tests: [unique, not_null]
+      - name: order_id
+        data_tests: [not_null]
+      - name: order_date_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_key
+      - name: customer_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customers')
+                field: customer_key
+      - name: product_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_products')
+                field: product_key
+      - name: channel
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [marketplace, web, mobile]
+      - name: quantity
+        description: Units ordered on the line.
+      - name: gross_amount
+        description: Quantity times unit price, before discount.
+      - name: net_amount
+        description: Gross amount after the line discount. Excludes shipping.
+      - name: units_sold
+        description: Quantity, counted as zero when the order was cancelled.
+      - name: net_sales_amount
+        description: Net amount, counted as zero when the order was cancelled.
+
+  - name: fct_orders
+    description: >
+      Orders fact. Grain: one row per order. Carries shipping, order totals
+      and the dates of each step from payment to delivery.
+    columns:
+      - name: order_id
+        data_tests: [unique, not_null]
+      - name: order_date_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_key
+      - name: customer_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customers')
+                field: customer_key
+      - name: order_status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [created, paid, shipped, delivered, cancelled, returned]
+      - name: hours_to_ship
+        description: Hours between the order and its shipment. Empty until shipped.
+      - name: days_to_deliver
+        description: Days between the order and its delivery. Empty until delivered.
+      - name: billed_amount
+        description: Net amount plus shipping, counted as zero when the order was cancelled.
