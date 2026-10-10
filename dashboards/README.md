@@ -212,11 +212,11 @@ When a number differs:
 
 ## 8. Save and publish
 
-- Save the report as `dashboards/ecommerce_sales.pbix` and commit it. The
+- Save the report as `rapport.pbix` at the root of the repository and commit it. The
   file embeds the imported data, so expect a few megabytes.
 - Export one image per page (File > Export > Export to PDF, or a screenshot)
   to `docs/images/` as `dashboard_sales.png`, `dashboard_customers.png`,
-  `dashboard_operations.png` and `dashboard_quality.png`, then uncomment the
-  image block of the "Dashboard" section in the main README.
+  `dashboard_operations.png` and `dashboard_quality.png`. The main README
+  already links to these four files.
 
 After each new run of the pipeline, Home > Refresh reloads the nine tables.
