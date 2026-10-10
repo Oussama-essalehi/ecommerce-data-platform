@@ -36,6 +36,13 @@ warehouse: ## Load gold into PostgreSQL, then build and test the star schema wit
 
 all: lake quality warehouse ## Run the whole pipeline, from the sources to the marts
 
+docs: ## Generate and serve the warehouse documentation and lineage on http://localhost:8081 (Ctrl+C to stop)
+	docker compose run --rm --service-ports dbt-docs
+
+figures: ## Print the figures the Power BI report must show, computed on the warehouse
+	docker compose cp dashboards/check_figures.sql warehouse:/tmp/check_figures.sql
+	docker compose exec warehouse psql -U warehouse -d warehouse -f /tmp/check_figures.sql
+
 trigger: ## Start a run of the daily DAG in Airflow now
 	docker compose exec airflow airflow dags unpause ecommerce_daily
 	docker compose exec airflow airflow dags trigger ecommerce_daily
@@ -55,5 +62,5 @@ test: ## Run the Spark job tests inside the pipelines image
 help:
 	@grep -E "^[a-z]+:.*##" Makefile | sed "s/:.*## /\t/"
 
-.PHONY: up down reset csv summary bronze silver gold lake quality warehouse all trigger psql status logs test help
+.PHONY: up down reset csv summary bronze silver gold lake quality warehouse all docs figures trigger psql status logs test help
 .DEFAULT_GOAL := help

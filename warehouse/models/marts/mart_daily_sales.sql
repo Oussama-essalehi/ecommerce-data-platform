@@ -1,5 +1,6 @@
--- Sales per day, channel and product category: the table behind the sales
--- dashboard. Small enough to load whole into Power BI.
+-- Sales per day, channel and product category, already aggregated: for
+-- quick SQL questions and for tools that cannot hold the star schema. The
+-- Power BI report reads the star schema itself, where it can slice further.
 --
 -- Careful with `orders`: an order holding products of two categories is
 -- counted once in each. Sum it across categories and it overstates the

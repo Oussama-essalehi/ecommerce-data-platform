@@ -1,0 +1,166 @@
+// Measures of the sales dashboard.
+//
+// This file is a DAX query: paste it whole into the DAX query view of
+// Power BI Desktop (the DAX query icon in the left bar).
+//
+//   1. Run          the EVALUATE statements at the bottom return every measure
+//                   over the whole warehouse. Compare with check_figures.sql.
+//   2. Update model the "Update model with changes" button above the editor
+//                   (or "Update model: Add new measure" above each MEASURE
+//                   line) saves the measures into the model.
+//
+// Without the DAX query view, create each measure by hand: select the table
+// named before the bracket, Modeling > New measure, and paste the name and
+// the expression as  Net Sales = SUM ( fct_sales[net_sales_amount] ).
+//
+// The table names must be the ones of the warehouse (fct_sales, dim_date...),
+// without the schema in front: see step 2 of the README of this folder.
+
+DEFINE
+
+    // ---- Sales, from fct_sales: follow every slicer (date, channel, customer, product)
+
+    // Cancelled orders are already counted as zero in these two columns.
+    MEASURE fct_sales[Net Sales] = SUM ( fct_sales[net_sales_amount] )
+    MEASURE fct_sales[Units Sold] = SUM ( fct_sales[units_sold] )
+
+    MEASURE fct_sales[Gross Sales] =
+        CALCULATE ( SUM ( fct_sales[gross_amount] ), fct_sales[is_cancelled] = FALSE () )
+    MEASURE fct_sales[Discounts] =
+        CALCULATE ( SUM ( fct_sales[discount_amount] ), fct_sales[is_cancelled] = FALSE () )
+    MEASURE fct_sales[Discount Rate] = DIVIDE ( [Discounts], [Gross Sales] )
+
+    // Counted on the sales lines, so that a product or category slicer
+    // gives the orders containing that product.
+    MEASURE fct_sales[Orders] =
+        CALCULATE ( DISTINCTCOUNT ( fct_sales[order_id] ), fct_sales[is_cancelled] = FALSE () )
+    // Products only, shipping excluded.
+    MEASURE fct_sales[Average Basket] = DIVIDE ( [Net Sales], [Orders] )
+
+    // ---- Sales over time: need dim_date marked as a date table
+
+    // Blank for the months after the last sale, which dim_date already holds.
+    MEASURE fct_sales[Net Sales Previous Month] =
+        IF (
+            NOT ISBLANK ( [Net Sales] ),
+            CALCULATE ( [Net Sales], DATEADD ( dim_date[date_day], -1, MONTH ) )
+        )
+    MEASURE fct_sales[Net Sales MoM %] =
+        DIVIDE ( [Net Sales] - [Net Sales Previous Month], [Net Sales Previous Month] )
+    MEASURE fct_sales[Net Sales 7-Day Average] =
+        VAR LastDay = MAX ( dim_date[date_day] )
+        RETURN
+            IF (
+                NOT ISBLANK ( [Net Sales] ),
+                AVERAGEX (
+                    DATESINPERIOD ( dim_date[date_day], LastDay, -7, DAY ),
+                    [Net Sales]
+                )
+            )
+
+    // ---- Orders, from fct_orders: follow date, channel and customer slicers,
+    //      not product slicers (an order has no single product)
+
+    MEASURE fct_orders[Orders Placed] = COUNTROWS ( fct_orders )
+    MEASURE fct_orders[Cancelled Orders] =
+        CALCULATE ( COUNTROWS ( fct_orders ), fct_orders[is_cancelled] = TRUE () )
+    MEASURE fct_orders[Cancellation Rate] = DIVIDE ( [Cancelled Orders], [Orders Placed] )
+    MEASURE fct_orders[Returned Orders] =
+        CALCULATE ( COUNTROWS ( fct_orders ), fct_orders[is_returned] = TRUE () )
+    // Returned among the orders that were not cancelled.
+    MEASURE fct_orders[Return Rate] =
+        DIVIDE ( [Returned Orders], [Orders Placed] - [Cancelled Orders] )
+
+    // Products and shipping, cancelled orders counted as zero.
+    MEASURE fct_orders[Billed Amount] = SUM ( fct_orders[billed_amount] )
+    MEASURE fct_orders[Shipping Fees] =
+        CALCULATE ( SUM ( fct_orders[shipping_fee] ), fct_orders[is_cancelled] = FALSE () )
+    MEASURE fct_orders[Average Order Value] =
+        DIVIDE ( [Billed Amount], [Orders Placed] - [Cancelled Orders] )
+
+    // Empty for orders not shipped or not delivered yet, which AVERAGE skips.
+    MEASURE fct_orders[Average Hours to Ship] = AVERAGE ( fct_orders[hours_to_ship] )
+    MEASURE fct_orders[Average Days to Deliver] = AVERAGE ( fct_orders[days_to_deliver] )
+
+    // ---- Customers, from mart_customers: lifetime figures, no date slicer
+
+    MEASURE mart_customers[Customers] = COUNTROWS ( mart_customers )
+    MEASURE mart_customers[Buyers] =
+        CALCULATE ( COUNTROWS ( mart_customers ), mart_customers[orders] > 0 )
+    MEASURE mart_customers[Repeat Buyers] =
+        CALCULATE ( COUNTROWS ( mart_customers ), mart_customers[orders] >= 2 )
+    MEASURE mart_customers[Repeat Rate] = DIVIDE ( [Repeat Buyers], [Buyers] )
+    MEASURE mart_customers[Lifetime Spend] = SUM ( mart_customers[total_spent] )
+    MEASURE mart_customers[Average Spend per Buyer] = DIVIDE ( [Lifetime Spend], [Buyers] )
+
+    // ---- Data quality: the latest run of the quality job...
+
+    MEASURE mart_data_quality[Checks] =
+        CALCULATE ( COUNTROWS ( mart_data_quality ), mart_data_quality[is_latest_run] = TRUE () )
+    MEASURE mart_data_quality[Checks Passed] =
+        CALCULATE ( [Checks], mart_data_quality[status] = "passed" )
+    MEASURE mart_data_quality[Checks in Warning] =
+        CALCULATE ( [Checks], mart_data_quality[status] = "warning" )
+    MEASURE mart_data_quality[Checks Failed] =
+        CALCULATE ( [Checks], mart_data_quality[status] = "failed" )
+    MEASURE mart_data_quality[Pass Rate] = DIVIDE ( [Checks Passed], [Checks] )
+    MEASURE mart_reject_history[Rejected Records] =
+        CALCULATE (
+            SUM ( mart_reject_history[rejected] ),
+            mart_reject_history[is_latest_run] = TRUE ()
+        )
+
+    // ---- ...and every run, for the charts with checked_at on the axis
+
+    MEASURE mart_data_quality[Run Pass Rate] =
+        DIVIDE (
+            CALCULATE ( COUNTROWS ( mart_data_quality ), mart_data_quality[status] = "passed" ),
+            COUNTROWS ( mart_data_quality )
+        )
+    MEASURE mart_reject_history[Rejected Records per Run] = SUM ( mart_reject_history[rejected] )
+
+// ---- Check figures: one row with every measure over the whole warehouse
+
+EVALUATE
+ROW (
+    "Net Sales", [Net Sales],
+    "Units Sold", [Units Sold],
+    "Orders", [Orders],
+    "Average Basket", [Average Basket],
+    "Gross Sales", [Gross Sales],
+    "Discounts", [Discounts],
+    "Discount Rate", [Discount Rate],
+    "Orders Placed", [Orders Placed],
+    "Cancelled Orders", [Cancelled Orders],
+    "Cancellation Rate", [Cancellation Rate],
+    "Returned Orders", [Returned Orders],
+    "Return Rate", [Return Rate],
+    "Billed Amount", [Billed Amount],
+    "Shipping Fees", [Shipping Fees],
+    "Average Order Value", [Average Order Value],
+    "Average Hours to Ship", [Average Hours to Ship],
+    "Average Days to Deliver", [Average Days to Deliver],
+    "Customers", [Customers],
+    "Buyers", [Buyers],
+    "Repeat Buyers", [Repeat Buyers],
+    "Repeat Rate", [Repeat Rate],
+    "Lifetime Spend", [Lifetime Spend],
+    "Average Spend per Buyer", [Average Spend per Buyer],
+    "Checks", [Checks],
+    "Checks Passed", [Checks Passed],
+    "Checks in Warning", [Checks in Warning],
+    "Checks Failed", [Checks Failed],
+    "Pass Rate", [Pass Rate],
+    "Rejected Records", [Rejected Records]
+)
+
+// ---- Check figures: the monthly table of page 1
+
+EVALUATE
+SUMMARIZECOLUMNS (
+    dim_date[year_month],
+    "Net Sales", [Net Sales],
+    "Net Sales Previous Month", [Net Sales Previous Month],
+    "Net Sales MoM %", [Net Sales MoM %]
+)
+ORDER BY dim_date[year_month]

@@ -1,15 +1,29 @@
 -- Rejected records per source and reason, run after run, with the change
 -- since the previous run. A reason whose count jumps is a new problem in a
--- source system.
+-- source system. Filter on is_latest_run for the current state.
+with history as (
+
+    select * from {{ ref('stg_quality_reject_history') }}
+
+),
+
+latest as (
+
+    select max(checked_at) as latest_checked_at from history
+
+)
+
 select
-    run_id,
-    checked_at,
-    checked_at::date as checked_date,
-    source,
-    reason,
-    rejected,
-    rejected - lag(rejected) over (
-        partition by source, reason
-        order by checked_at
+    history.run_id,
+    history.checked_at,
+    history.checked_at::date as checked_date,
+    history.checked_at = latest.latest_checked_at as is_latest_run,
+    history.source,
+    history.reason,
+    history.rejected,
+    history.rejected - lag(history.rejected) over (
+        partition by history.source, history.reason
+        order by history.checked_at
     ) as change_since_previous_run
-from {{ ref('stg_quality_reject_history') }}
+from history
+cross join latest

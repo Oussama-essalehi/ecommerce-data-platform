@@ -3,13 +3,15 @@ version: 2
 models:
   - name: mart_daily_sales
     description: >
-      Sales per day, channel and product category, for the sales dashboard.
+      Sales per day, channel and product category, already aggregated: for
+      quick SQL questions and light reports. Matches fct_sales to the cent.
     data_tests:
       - unique_combination:
           arguments:
             columns: [date_day, channel, category]
     columns:
       - name: date_day
+        description: The calendar day.
         data_tests: [not_null]
       - name: net_sales
         description: Sales after discounts, excluding shipping and cancelled orders.
@@ -17,6 +19,38 @@ models:
         description: >
           Orders containing at least one product of the category. Not
           additive across categories.
+      - name: year
+        description: Calendar year.
+      - name: year_month
+        description: "Year and month as text, YYYY-MM. Sorts in calendar order."
+      - name: iso_week
+        description: "ISO week number, 1 to 53. Weeks start on Monday."
+      - name: day_name
+        description: "Name of the day, in English."
+      - name: is_weekend
+        description: True on Saturdays and Sundays.
+      - name: is_public_holiday
+        description: True on French public holidays.
+      - name: sales_event
+        description: "Name of the commercial event running that day (Black Friday, Winter sales, Summer sales). Empty otherwise."
+      - name: channel
+        description: "Sales channel the order came from: marketplace, web or mobile."
+      - name: category
+        description: Product category.
+      - name: units_sold
+        description: "Units sold, cancelled orders excluded."
+      - name: gross_sales
+        description: "Sales before discounts, cancelled orders excluded."
+      - name: discounts
+        description: "Amount taken off by discounts, cancelled orders excluded."
+      - name: cancelled_orders
+        description: Cancelled orders containing at least one product of the category.
+      - name: cancelled_amount
+        description: "Net amount of the cancelled orders: the sales that did not happen."
+      - name: returned_orders
+        description: Returned orders containing at least one product of the category.
+      - name: returned_amount
+        description: Net amount of the returned orders. Still counted in net_sales.
 
   - name: mart_customers
     description: >
@@ -24,8 +58,10 @@ models:
       (No purchase, One-time, Repeat, Loyal).
     columns:
       - name: customer_key
+        description: Key to dim_customers. One row per customer; the Unknown member is left out.
         data_tests: [unique, not_null]
       - name: customer_segment
+        description: "No purchase (0 non-cancelled orders), One-time (1), Repeat (2 to 4) or Loyal (5 and more)."
         data_tests:
           - accepted_values:
               arguments:
@@ -34,6 +70,32 @@ models:
         description: Amount billed across non-cancelled orders, shipping included.
       - name: days_since_last_order
         description: Days between the customer's last order and the last order date in the warehouse.
+      - name: customer_id
+        description: "The customer's identifier in the shop's back-office."
+      - name: full_name
+        description: First and last name in one field.
+      - name: city
+        description: "City of the customer's address."
+      - name: department_code
+        description: "French département, the first two digits of the postal code."
+      - name: signup_date
+        description: "Day the customer account was created, in Paris time."
+      - name: orders_placed
+        description: "Orders placed, cancelled ones included."
+      - name: orders
+        description: Orders that were not cancelled.
+      - name: cancelled_orders
+        description: Orders the customer placed that were cancelled.
+      - name: returned_orders
+        description: Orders the customer sent back.
+      - name: first_order_date
+        description: Day of the first non-cancelled order. Empty without a purchase.
+      - name: last_order_date
+        description: Day of the latest non-cancelled order. Empty without a purchase.
+      - name: units_bought
+        description: Units bought across non-cancelled orders.
+      - name: average_order_value
+        description: total_spent divided by orders. Empty without a purchase.
 
   - name: mart_product_demand_features
     description: >
@@ -41,8 +103,10 @@ models:
       training table for demand forecasting. units_sold is the target.
     columns:
       - name: product_key
+        description: Key to dim_products.
         data_tests: [not_null]
       - name: date_day
+        description: "The day the row describes. The current day is left out, its orders are still coming in."
         data_tests: [not_null]
       - name: units_sold
         description: Units sold that day, cancelled orders excluded. The value to predict.
@@ -55,6 +119,36 @@ models:
         description: Average daily units over the 28 days before date_day.
       - name: days_on_sale
         description: Days the product had been on sale before date_day.
+      - name: product_id
+        description: "The product's reference in the catalogue."
+      - name: category
+        description: Product category.
+      - name: brand
+        description: Product brand.
+      - name: orders
+        description: Non-cancelled orders containing the product that day. Not known before the day ends.
+      - name: net_sales
+        description: Sales of the product that day after discounts. Not known before the day ends.
+      - name: average_unit_price
+        description: Average price paid per line that day. Empty on a day without sales.
+      - name: discount_rate
+        description: "Discounts divided by gross sales that day, between 0 and 1. Empty on a day without sales."
+      - name: units_sold_lag_1
+        description: Units sold the day before.
+      - name: units_sold_lag_14
+        description: Units sold the same weekday two weeks earlier.
+      - name: day_of_week
+        description: "ISO day number, 1 for Monday to 7 for Sunday."
+      - name: is_weekend
+        description: True on Saturdays and Sundays.
+      - name: month
+        description: "Month number, 1 to 12."
+      - name: is_public_holiday
+        description: True on French public holidays.
+      - name: is_sales_event
+        description: True during a commercial event.
+      - name: sales_event
+        description: "Name of the commercial event running that day (Black Friday, Winter sales, Summer sales). Empty otherwise."
 
   - name: mart_data_quality
     description: >
@@ -74,6 +168,7 @@ models:
               arguments:
                 values: [passed, warning, failed]
       - name: dimension
+        description: "What the check is about: completeness, uniqueness, validity, consistency, freshness or volume."
         data_tests:
           - accepted_values:
               arguments:
@@ -82,6 +177,36 @@ models:
         description: True for the rows of the most recent run.
       - name: is_problem
         description: True when the check did not pass, whatever its severity.
+      - name: run_id
+        description: "Identifier of the run of the quality job: its start time and a random suffix."
+      - name: checked_at
+        description: Moment the quality job ran.
+      - name: checked_date
+        description: Day the quality job ran.
+      - name: layer
+        description: "Layer of the lake the checked table belongs to: bronze, silver or gold."
+      - name: table_name
+        description: Table the check ran on.
+      - name: checked_table
+        description: "Layer and table in one field, for example silver.orders."
+      - name: check_name
+        description: "Short name of the check, unique within its table."
+      - name: severity
+        description: "error when a failure stops the pipeline, warning when it is only reported."
+      - name: description
+        description: "What the check verifies, in a sentence."
+      - name: column_name
+        description: Column the check reads. Empty for table-level checks.
+      - name: element_count
+        description: Rows the check looked at.
+      - name: unexpected_count
+        description: Rows that did not meet the expectation.
+      - name: unexpected_percent
+        description: "Share of rows that did not meet the expectation, in percent."
+      - name: observed_value
+        description: "Value measured by the check when it compares one number to a threshold (a row count, an age)."
+      - name: sample
+        description: "A few of the unexpected values, to start an investigation from."
 
   - name: mart_reject_history
     description: >
@@ -93,7 +218,22 @@ models:
             columns: [run_id, source, reason]
     columns:
       - name: rejected
+        description: "Records rejected for this reason, in total, as of this run."
         data_tests:
           - accepted_range:
               arguments:
                 min_value: 0
+      - name: run_id
+        description: "Identifier of the run of the quality job: its start time and a random suffix."
+      - name: checked_at
+        description: Moment the quality job ran.
+      - name: checked_date
+        description: Day the quality job ran.
+      - name: is_latest_run
+        description: True for the rows of the most recent run.
+      - name: source
+        description: Bronze table the rejected records came from.
+      - name: reason
+        description: "Why the silver layer set the records aside, for example unknown_product or malformed_json."
+      - name: change_since_previous_run
+        description: Difference with the previous run. Empty on the first run.

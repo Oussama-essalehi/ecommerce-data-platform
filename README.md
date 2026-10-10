@@ -7,7 +7,16 @@ warehouse that feeds dashboards and demand-forecasting features.
 
 **Stack:** Python · Kafka · Spark · Delta Lake · Airflow · dbt · PostgreSQL · Great Expectations · Docker
 
-> **Status:** phases 1 to 6 of 7 are done: the pipeline runs end to end and is scheduled by Airflow. See the [roadmap](#roadmap).
+What it covers:
+
+- **Batch and streaming ingestion** of three sources (REST API, daily CSV files, Kafka events) into Delta tables with Spark
+- **A medallion lake** that types, deduplicates and reconciles the data, and sets aside what it rejects with the reason
+- **A star-schema warehouse** built and tested with dbt, with data marts for reporting and for demand forecasting
+- **Data quality gates**: 88 Great Expectations checks on the lake and 83 dbt tests in the warehouse, with their history
+- **Daily orchestration** with Airflow: a sensor on the late source, retries, failure alerts
+- **Serving**: a Power BI report with its measures and check figures, and a documentation site with the lineage from the lake to the dashboard
+
+Everything runs on a laptop with `docker compose up`, on synthetic data that is identical on every machine.
 
 ## Architecture
 
@@ -32,6 +41,7 @@ flowchart LR
     G --> W[(PostgreSQL<br/>star schema, dbt)]
     W --> BI[Power BI]
     W --> F[Demand-forecast<br/>features]
+    W --> DOC[dbt docs<br/>lineage]
 
     AF[Airflow] -. orchestrates .-> Lake
     AF -. orchestrates .-> W
@@ -39,17 +49,19 @@ flowchart LR
     GE -. checks .-> W
 ```
 
-## Roadmap
+## Phases
+
+The platform was built in seven phases, each one runnable and tested before the next.
 
 | # | Phase | What it delivers | Status |
 | - | :-- | :-- | :-: |
 | 1 | **Sources and streaming backbone** | Three simulated source systems (REST API, daily CSV exports, order events), Kafka, Docker Compose, tests, CI | ✅ |
 | 2 | **Bronze ingestion** | Spark batch jobs for the API and the CSV files, Spark Structured Streaming for Kafka, all landing raw in Delta tables | ✅ |
 | 3 | **Silver and gold** | Typing, deduplication, late and broken events, the two order sources merged into one model; business tables in gold | ✅ |
-| 4 | **Warehouse** | PostgreSQL star schema with dbt: sales fact, customer, product and date dimensions, data marts | ✅ |
+| 4 | **Warehouse** | PostgreSQL star schema with dbt: sales and orders facts, date, channel, customer and product dimensions, data marts | ✅ |
 | 5 | **Data quality** | Great Expectations suites and dbt tests for completeness, uniqueness and freshness, with an anomaly log | ✅ |
 | 6 | **Orchestration** | Airflow DAGs for the daily batch, with retries and failure alerts | ✅ |
-| 7 | **Serving and documentation** | Power BI dashboard, demand-forecast feature table, dbt docs and lineage | ⬜ |
+| 7 | **Serving and documentation** | Power BI dashboard, demand-forecast feature table, dbt docs and lineage | ✅ |
 
 ## Quick start
 
@@ -79,6 +91,9 @@ docker compose run --rm spark quality
 # 7. Load gold into the warehouse, then build and test the star schema
 docker compose run --rm spark warehouse-load
 docker compose run --rm dbt build
+
+# 8. Browse the documentation of the warehouse and its lineage: http://localhost:8081
+docker compose run --rm --service-ports dbt-docs
 ```
 
 Order events need no command for bronze: the `bronze-events` container reads
@@ -100,6 +115,8 @@ Then look around:
 | Delta tables | `data/lake/bronze/`, `silver/`, `gold/` |
 | Warehouse (PostgreSQL) | `localhost:5432`, database, user and password `warehouse` |
 | Airflow | http://localhost:8080 |
+| Warehouse documentation and lineage | http://localhost:8081, while the command of step 8 runs |
+| Power BI report | Built from [`dashboards/`](dashboards/) |
 | Data-quality report | `data/quality/gx/uncommitted/data_docs/local_site/index.html` |
 | Failure alerts | `data/alerts/alerts.jsonl` |
 | Producer progress | `docker compose logs -f order-producer` |
@@ -363,9 +380,11 @@ Each layer is a PostgreSQL schema:
 ```mermaid
 erDiagram
     dim_date ||--o{ fct_sales : "order_date_key"
+    dim_channels ||--o{ fct_sales : "channel"
     dim_customers ||--o{ fct_sales : "customer_key"
     dim_products ||--o{ fct_sales : "product_key"
     dim_date ||--o{ fct_orders : "order_date_key"
+    dim_channels ||--o{ fct_orders : "channel"
     dim_customers ||--o{ fct_orders : "customer_key"
 
     fct_sales {
@@ -374,7 +393,7 @@ erDiagram
         int order_date_key FK
         text customer_key FK
         text product_key FK
-        text channel
+        text channel FK
         int quantity
         numeric net_amount
         int units_sold
@@ -384,6 +403,7 @@ erDiagram
         text order_id PK
         int order_date_key FK
         text customer_key FK
+        text channel FK
         text order_status
         numeric shipping_fee
         numeric total_amount
@@ -397,6 +417,12 @@ erDiagram
         boolean is_weekend
         boolean is_public_holiday
         text sales_event
+    }
+    dim_channels {
+        text channel PK
+        text channel_name
+        text source_system
+        boolean is_own_shop
     }
     dim_customers {
         text customer_key PK
@@ -430,6 +456,10 @@ Modelling choices:
 - **Cancelled orders stay in the facts** with zero in `units_sold`,
   `net_sales_amount` and `billed_amount`. Sales measures add up correctly
   without a filter, and cancellations remain available for analysis.
+- **The channel is a dimension of its own**, small as it is. Both facts
+  carry it, and a report needs one place to filter it from: a slicer on
+  `dim_channels` filters sales and orders together. Its three codes are
+  short and stable, so they serve as the key without a hash.
 - **The date dimension knows the French calendar**: public holidays, Black
   Friday week, winter and summer sales. It extends 90 days past the last
   order so forecasts can be joined to it.
@@ -438,7 +468,7 @@ Modelling choices:
 
 | Mart | One row per | For |
 | :-- | :-- | :-- |
-| `mart_daily_sales` | Day, channel and category | The sales dashboard |
+| `mart_daily_sales` | Day, channel and category | Quick SQL questions and light reports, already aggregated |
 | `mart_customers` | Customer | Purchase history, recency, segment (No purchase, One-time, Repeat, Loyal) |
 | `mart_product_demand_features` | Product and day | Training a demand-forecasting model |
 | `mart_data_quality` | Quality check and run | Following the quality checks over time |
@@ -465,7 +495,7 @@ tests inside the warehouse.
 
 ```bash
 docker compose run --rm spark quality          # 88 checks on the lake
-docker compose run --rm dbt build              # models and 77 tests in the warehouse
+docker compose run --rm dbt build              # models and 83 tests in the warehouse
 docker compose run --rm dbt source freshness   # is the warehouse load recent?
 ```
 
@@ -584,6 +614,101 @@ The setup is sized for a laptop: one container runs the scheduler, the DAG
 processor and the web interface, and no login is asked. A production
 deployment would run these components separately, with authentication.
 
+## Serving
+
+What the warehouse is for: a report, a training table, and a documentation
+site that tells a newcomer what each table means and where it comes from.
+
+### Dashboard
+
+A four-page Power BI report reads the star schema: sales overview,
+customers, order operations and data quality. Power BI files cannot be
+generated from code, so [`dashboards/`](dashboards/) holds what makes the
+report reproducible and verifiable:
+
+| File | Content |
+| :-- | :-- |
+| [`README.md`](dashboards/README.md) | The build guide: connection, model and relationships, the four pages visual by visual |
+| [`measures.dax`](dashboards/measures.dax) | The 34 measures, as one DAX query that also returns their values |
+| [`check_figures.sql`](dashboards/check_figures.sql) | The same figures computed in SQL on the warehouse |
+| [`theme.json`](dashboards/theme.json) | Colours and fonts |
+
+The check figures are the point. A dashboard is trusted when its numbers
+can be traced: every card and chart of the report has a query of the same
+name in `check_figures.sql`, and the two must agree.
+
+```bash
+docker compose cp dashboards/check_figures.sql warehouse:/tmp/check_figures.sql
+docker compose exec warehouse psql -U warehouse -d warehouse -f /tmp/check_figures.sql
+```
+
+<!--
+Uncomment once the four page images are in docs/images/ (see step 8 of dashboards/README.md).
+
+| Sales overview | Customers |
+| :-: | :-: |
+| ![Sales overview](docs/images/dashboard_sales.png) | ![Customers](docs/images/dashboard_customers.png) |
+| **Operations** | **Data quality** |
+| ![Operations](docs/images/dashboard_operations.png) | ![Data quality](docs/images/dashboard_quality.png) |
+-->
+
+### Demand-forecast features
+
+`marts.mart_product_demand_features` is a training table: one row per
+product and per day, `units_sold` as the target, and features that are all
+known before the day starts (lags, rolling averages, calendar). No model is
+trained in this repository; the table is where one would start.
+
+Any model has to beat the obvious guesses first. This query scores three of
+them on the last 28 days, as a mean absolute error in units per product and
+day:
+
+```sql
+with recent as (
+    select *
+    from marts.mart_product_demand_features
+    where days_on_sale >= 28
+      and date_day > (select max(date_day) from marts.mart_product_demand_features) - 28
+)
+select
+    round(avg(abs(units_sold - units_sold_lag_7)), 3)   as same_weekday_last_week,
+    round(avg(abs(units_sold - units_sold_avg_7d)), 3)  as average_of_last_7_days,
+    round(avg(abs(units_sold - units_sold_avg_28d)), 3) as average_of_last_28_days
+from recent;
+```
+
+### Documentation and lineage
+
+dbt generates a documentation site from the project: every table and column
+with its description, the tests that guard it, the SQL behind it, and the
+graph of what depends on what.
+
+```bash
+docker compose run --rm --service-ports dbt-docs    # then http://localhost:8081, Ctrl+C to stop
+```
+
+![Lineage of the warehouse, from the lake tables to the dashboard](docs/images/dbt_lineage.png)
+
+Sources are in green, models in blue, and the consumers of the warehouse in
+orange. The Power BI report and the forecast training set are declared as
+dbt [exposures](warehouse/models/exposures.yml), which puts them on the
+graph: before changing a model, the lineage shows which report it feeds.
+
+```bash
+# Everything the dashboard depends on, back to the lake
+docker compose run --rm dbt ls --select +exposure:sales_dashboard
+```
+
+Documentation drifts unless something checks it. CI runs
+[`ci/check_docs.py`](warehouse/ci/check_docs.py) after building the
+warehouse: the build fails if a column of the `core` or `marts` schemas has
+no description, or if a described column no longer exists.
+
+The site can also be published to GitHub Pages: enable Pages once in the
+repository settings (Settings > Pages > Source: GitHub Actions), then start
+the CI workflow by hand from the Actions tab. Its `publish-docs` job only
+runs then.
+
 ## Data defects, injected on purpose
 
 Clean sources would leave nothing for the quality checks to do. The simulator
@@ -629,6 +754,7 @@ Copy `.env.example` to `.env` to change the defaults.
 | `WAREHOUSE_PASSWORD` | `warehouse` | Password of the warehouse database |
 | `WAREHOUSE_HOST_PORT` | `5432` | Port of the warehouse on your machine; change it if another PostgreSQL already uses 5432 |
 | `AIRFLOW_HOST_PORT` | `8080` | Port of the Airflow interface on your machine |
+| `DBT_DOCS_HOST_PORT` | `8081` | Port of the dbt documentation site on your machine |
 | `ALERT_WEBHOOK_URL` | empty | Chat webhook that receives failure alerts |
 
 ## Tests
@@ -641,6 +767,10 @@ docker compose run --rm --no-deps --entrypoint python spark -m pytest
 
 # Warehouse: dbt builds every model and runs its tests
 docker compose run --rm dbt build
+
+# Documentation: every column of the star schema and the marts is described
+docker compose run --rm dbt docs generate
+docker compose run --rm --entrypoint python dbt ci/check_docs.py
 
 # Orchestration: the DAG loads, runs in the right order, retries and alerts as intended
 cd orchestration
@@ -663,7 +793,7 @@ the project's warehouse without touching its data.
 
 ```
 .
-├── docker-compose.yml        Every service: sources, Kafka, bronze stream, warehouse, Airflow
+├── docker-compose.yml        Every service: sources, Kafka, bronze stream, warehouse, Airflow, dbt docs
 ├── sources/
 │   ├── shop_sim/             The simulated source systems
 │   │   ├── world.py          Customers and products, with their history
@@ -700,17 +830,53 @@ the project's warehouse without touching its data.
 ├── warehouse/                The dbt project
 │   ├── models/
 │   │   ├── staging/          One view per table loaded from the lake
-│   │   ├── core/             Star schema: dim_date, dim_customers, dim_products, fct_sales, fct_orders
-│   │   └── marts/            Daily sales, customers, demand features
+│   │   ├── core/             Star schema: dim_date, dim_channels, dim_customers, dim_products, fct_sales, fct_orders
+│   │   ├── marts/            Daily sales, customers, demand features, quality history
+│   │   ├── exposures.yml     What reads the warehouse: the dashboard, the forecast training set
+│   │   └── overview.md       Home page of the documentation site
 │   ├── seeds/                Public holidays and sales events
 │   ├── tests/                Reconciliation and monitoring tests, generic tests
 │   ├── macros/               Surrogate keys, schema naming
-│   └── ci/                   Sample data used by CI
+│   └── ci/                   Sample data used by CI, documentation coverage check
 ├── orchestration/
 │   ├── dags/
 │   │   ├── ecommerce_daily.py    The daily batch
 │   │   └── common/alerting.py    Failure alerts
 │   ├── tests/
 │   └── Dockerfile            Airflow, with the Spark jobs and dbt in their own environments
+├── dashboards/               Power BI report: build guide, DAX measures, check figures, theme
+├── docs/images/              Images used by this README
 └── data/                     Generated files and the lake, not versioned
 ```
+
+## Limits, and what production would change
+
+The platform is complete, but sized and simplified for one machine. What
+that means, stated plainly:
+
+- **The data is synthetic.** The simulator has a demand model and planted
+  defects, but real sources misbehave in ways no one thought to simulate.
+  Some regularities show in the report, such as delivery times that are the
+  same on every channel.
+- **Everything is single-node.** Spark runs in local mode, Kafka has one
+  broker and no replication, the lake is a folder on disk. Production would
+  use object storage, a Spark cluster and a replicated Kafka. The jobs
+  would keep their logic: paths and Spark settings already come from
+  configuration.
+- **Silver and gold are rebuilt in full** at each run, and the warehouse is
+  reloaded in full. That is the simplest thing that is always correct, and
+  it is fast at this volume. With years of history it would become
+  incremental: `MERGE` into silver and gold, incremental dbt models.
+- **Only bronze is real time.** Events reach the lake within seconds, but
+  the warehouse is refreshed by the nightly batch. Fresher reporting would
+  mean a streaming silver layer, not a faster Airflow schedule.
+- **Airflow runs as one container without login**, and passwords have
+  defaults in the Compose file. Production would run the scheduler and the
+  web server apart, behind authentication, with secrets in a vault.
+- **No forecasting model.** The platform stops at the feature table.
+- **The Power BI report is built by hand** from the guide. Its measures and
+  check figures are versioned; the `.pbix` itself is a binary file that
+  cannot be reviewed or tested in CI.
+- **Customer data is not protected.** Names and emails are fake here. Real
+  ones would need masking in the lake and restricted access in the
+  warehouse.

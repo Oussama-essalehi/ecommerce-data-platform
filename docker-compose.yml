@@ -44,6 +44,19 @@ x-pipelines: &pipelines
     - ./data/lake:/data/lake
     - ./data/quality:/data/quality
 
+# Settings shared by the two containers that run dbt.
+x-dbt: &dbt
+  build: ./warehouse
+  image: ecommerce-data-platform/dbt:local
+  profiles: ["cli"]
+  environment:
+    <<: *warehouse-env
+  volumes:
+    - ./warehouse:/usr/app
+  depends_on:
+    warehouse:
+      condition: service_healthy
+
 services:
   # Single-node Kafka in KRaft mode (no ZooKeeper).
   # Two listeners: kafka:19092 for containers, localhost:9092 for your machine.
@@ -187,16 +200,20 @@ services:
   # dbt, which builds the star schema inside the warehouse:
   #   docker compose run --rm dbt build
   dbt:
-    build: ./warehouse
-    image: ecommerce-data-platform/dbt:local
-    profiles: ["cli"]
-    environment:
-      <<: *warehouse-env
-    volumes:
-      - ./warehouse:/usr/app
-    depends_on:
-      warehouse:
-        condition: service_healthy
+    <<: *dbt
+
+  # The documentation site of the warehouse: every table and column, the
+  # tests, and the lineage graph from the lake to the dashboard.
+  #   docker compose run --rm --service-ports dbt-docs      (or: make docs)
+  # then http://localhost:8081. Ctrl+C stops it.
+  dbt-docs:
+    <<: *dbt
+    init: true
+    entrypoint: ["sh", "-c"]
+    command:
+      - dbt docs generate --static && exec dbt docs serve --host 0.0.0.0 --port 8081 --no-browser
+    ports:
+      - "${DBT_DOCS_HOST_PORT:-8081}:8081"
 
   # Airflow's own database (runs, task states). Kept apart from the warehouse.
   airflow-db:

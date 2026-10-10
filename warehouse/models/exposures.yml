@@ -1,0 +1,40 @@
+version: 2
+
+# What reads the warehouse. Declaring the consumers puts them at the end of
+# the lineage graph: before changing a model, `dbt ls --select +exposure:*`
+# or the graph in the docs shows which report or dataset depends on it.
+exposures:
+  - name: sales_dashboard
+    label: Sales dashboard (Power BI)
+    type: dashboard
+    maturity: medium
+    description: >
+      Four-page Power BI report: sales overview, customers, order operations
+      and data quality. It imports the star schema and builds its measures on
+      top of it. How to build it, the DAX measures and the figures to check
+      it against are in the `dashboards/` folder of the repository.
+    depends_on:
+      - ref('dim_date')
+      - ref('dim_channels')
+      - ref('dim_customers')
+      - ref('dim_products')
+      - ref('fct_sales')
+      - ref('fct_orders')
+      - ref('mart_customers')
+      - ref('mart_data_quality')
+      - ref('mart_reject_history')
+    owner:
+      name: Oussama Essalehi
+
+  - name: demand_forecast_training_set
+    label: Demand forecast training set
+    type: ml
+    maturity: low
+    description: >
+      Daily units sold per product with calendar, price and lagged-sales
+      features, ready to train a demand forecasting model. The platform
+      stops at the feature table; no model is trained in this repository.
+    depends_on:
+      - ref('mart_product_demand_features')
+    owner:
+      name: Oussama Essalehi

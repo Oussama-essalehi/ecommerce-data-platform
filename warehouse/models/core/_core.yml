@@ -11,6 +11,7 @@ models:
         description: The date as an integer, YYYYMMDD.
         data_tests: [unique, not_null]
       - name: date_day
+        description: The calendar day.
         data_tests: [unique, not_null]
       - name: day_of_week
         description: ISO day number, 1 for Monday to 7 for Sunday.
@@ -18,6 +19,50 @@ models:
           - accepted_values:
               arguments:
                 values: [1, 2, 3, 4, 5, 6, 7]
+      - name: year
+        description: Calendar year.
+      - name: quarter
+        description: "Quarter number, 1 to 4."
+      - name: month
+        description: "Month number, 1 to 12."
+      - name: month_name
+        description: "Name of the month, in English. Sort it by `month` in a report."
+      - name: year_month
+        description: "Year and month as text, YYYY-MM. Sorts in calendar order."
+      - name: iso_year
+        description: "Year the ISO week belongs to. Differs from `year` around the first of January."
+      - name: iso_week
+        description: "ISO week number, 1 to 53. Weeks start on Monday."
+      - name: day_name
+        description: "Name of the day, in English."
+      - name: is_weekend
+        description: True on Saturdays and Sundays.
+      - name: is_public_holiday
+        description: True on French public holidays.
+      - name: holiday_name
+        description: Name of the public holiday. Empty on other days.
+      - name: is_sales_event
+        description: True during a commercial event.
+      - name: sales_event
+        description: "Name of the commercial event running that day (Black Friday, Winter sales, Summer sales). Empty otherwise."
+
+  - name: dim_channels
+    description: >
+      Sales channel dimension: one row per channel an order can come from
+      (marketplace, web, mobile), with the source system that reports it.
+    columns:
+      - name: channel
+        description: Channel code, as carried by the facts. The key of the dimension.
+        data_tests: [unique, not_null]
+      - name: channel_name
+        description: Channel name for display.
+      - name: source
+        description: Code of the source system the orders of this channel come from.
+        data_tests: [not_null]
+      - name: source_system
+        description: The source system in words.
+      - name: is_own_shop
+        description: True for the channels of the company's own shop, false for the partner marketplace.
 
   - name: dim_customers
     description: >
@@ -40,6 +85,7 @@ models:
                 where: "customer_id != 'UNKNOWN'"
                 severity: warn
       - name: postal_code
+        description: Five-digit French postal code. Empty when the source value was not one.
         data_tests:
           - not_null_proportion:
               arguments:
@@ -49,6 +95,18 @@ models:
                 severity: warn
       - name: department_code
         description: French département, the first two digits of the postal code.
+      - name: first_name
+        description: First name.
+      - name: last_name
+        description: Last name.
+      - name: full_name
+        description: First and last name in one field.
+      - name: city
+        description: "City of the customer's address."
+      - name: country
+        description: Country code of the address. Always FR in this dataset.
+      - name: signup_date
+        description: "Day the customer account was created, in Paris time."
 
   - name: dim_products
     description: >
@@ -59,13 +117,27 @@ models:
         description: Surrogate key, a hash of product_id.
         data_tests: [unique, not_null]
       - name: product_id
+        description: "The product's reference in the catalogue."
         data_tests: [unique, not_null]
       - name: category
+        description: Product category.
         data_tests: [not_null]
       - name: current_unit_price
         description: >
           Catalogue price today. The price actually paid is on each sale in
           fct_sales.
+      - name: product_name
+        description: Name shown in the shop.
+      - name: brand
+        description: Product brand.
+      - name: currency
+        description: Currency of the catalogue price. Always EUR in this dataset.
+      - name: is_active
+        description: False once the product has been withdrawn from sale.
+      - name: created_date
+        description: Day the product was added to the catalogue.
+      - name: discontinued_date
+        description: Day the product was withdrawn from sale. Empty while it is active.
 
   - name: fct_sales
     description: >
@@ -76,8 +148,10 @@ models:
         description: Surrogate key, a hash of order_id and line_number.
         data_tests: [unique, not_null]
       - name: order_id
+        description: "Order number given by the source system (MKP-... for the marketplace, WEB-... for the shop)."
         data_tests: [not_null]
       - name: order_date_key
+        description: "Day the order was placed, as a key to dim_date."
         data_tests:
           - not_null
           - relationships:
@@ -85,6 +159,7 @@ models:
                 to: ref('dim_date')
                 field: date_key
       - name: customer_key
+        description: Key to dim_customers. Points to the Unknown member when the customer could not be identified.
         data_tests:
           - not_null
           - relationships:
@@ -92,6 +167,7 @@ models:
                 to: ref('dim_customers')
                 field: customer_key
       - name: product_key
+        description: Key to dim_products. Points to the Unknown member when the product is not in the catalogue.
         data_tests:
           - not_null
           - relationships:
@@ -99,10 +175,15 @@ models:
                 to: ref('dim_products')
                 field: product_key
       - name: channel
+        description: Sales channel the order came from.
         data_tests:
           - accepted_values:
               arguments:
                 values: [marketplace, web, mobile]
+          - relationships:
+              arguments:
+                to: ref('dim_channels')
+                field: channel
       - name: quantity
         description: Units ordered on the line.
         data_tests:
@@ -110,11 +191,13 @@ models:
               arguments:
                 min_value: 1
       - name: unit_price
+        description: "Price of one unit at the time of the order, in euros, before discount."
         data_tests:
           - accepted_range:
               arguments:
                 min_value: 0
       - name: discount_pct
+        description: "Discount on the line, in percent of the gross amount."
         data_tests:
           - accepted_range:
               arguments:
@@ -132,6 +215,20 @@ models:
         description: Quantity, counted as zero when the order was cancelled.
       - name: net_sales_amount
         description: Net amount, counted as zero when the order was cancelled.
+      - name: line_number
+        description: "Position of the line in the order, starting at 1."
+      - name: order_date
+        description: "Day the order was placed, in Paris time."
+      - name: source
+        description: "Source system that reported the order: marketplace (daily CSV export) or web_shop (order events)."
+      - name: order_status
+        description: "Latest known status: created, paid, shipped, delivered, cancelled or returned."
+      - name: is_cancelled
+        description: True when the order was cancelled.
+      - name: is_returned
+        description: True when the order was delivered and then sent back.
+      - name: discount_amount
+        description: "Gross amount minus net amount: what the discount took off."
 
   - name: fct_orders
     description: >
@@ -139,8 +236,10 @@ models:
       and the dates of each step from payment to delivery.
     columns:
       - name: order_id
+        description: "Order number given by the source system (MKP-... for the marketplace, WEB-... for the shop)."
         data_tests: [unique, not_null]
       - name: order_date_key
+        description: "Day the order was placed, as a key to dim_date."
         data_tests:
           - not_null
           - relationships:
@@ -148,13 +247,23 @@ models:
                 to: ref('dim_date')
                 field: date_key
       - name: customer_key
+        description: Key to dim_customers. Points to the Unknown member when the customer could not be identified.
         data_tests:
           - not_null
           - relationships:
               arguments:
                 to: ref('dim_customers')
                 field: customer_key
+      - name: channel
+        description: Sales channel the order came from.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_channels')
+                field: channel
       - name: order_status
+        description: "Latest known status: created, paid, shipped, delivered, cancelled or returned."
         data_tests:
           - accepted_values:
               arguments:
@@ -172,6 +281,7 @@ models:
               arguments:
                 min_value: 0
       - name: shipping_fee
+        description: "Shipping charged to the customer, in euros."
         data_tests:
           - accepted_range:
               arguments:
@@ -184,3 +294,47 @@ models:
                 min_value: 0
       - name: billed_amount
         description: Net amount plus shipping, counted as zero when the order was cancelled.
+      - name: order_date
+        description: "Day the order was placed, in Paris time."
+      - name: order_ts
+        description: "Moment the order was placed, in UTC."
+      - name: source
+        description: "Source system that reported the order: marketplace (daily CSV export) or web_shop (order events)."
+      - name: payment_method
+        description: "How the order was paid: card, paypal, apple_pay, bank_transfer or installments."
+      - name: shipping_city
+        description: City the order is shipped to.
+      - name: shipping_postal_code
+        description: Postal code the order is shipped to.
+      - name: shipping_department_code
+        description: "French département the order is shipped to, the first two digits of the postal code."
+      - name: is_cancelled
+        description: True when the order was cancelled.
+      - name: is_returned
+        description: True when the order was delivered and then sent back.
+      - name: paid_at
+        description: "Moment the payment was confirmed, in UTC. Empty until then."
+      - name: shipped_at
+        description: "Moment the parcel left the warehouse, in UTC. Empty until then."
+      - name: delivered_at
+        description: "Moment the parcel was delivered, in UTC. Empty until then."
+      - name: cancelled_at
+        description: "Moment the order was cancelled, in UTC. Empty for the others."
+      - name: returned_at
+        description: "Moment the return was registered, in UTC. Empty for the others."
+      - name: lines_count
+        description: Number of lines in the order.
+      - name: units
+        description: "Units ordered, all lines together, whether the order was cancelled or not."
+      - name: gross_amount
+        description: "Sum of quantity times unit price over the lines, before discount."
+      - name: discount_amount
+        description: Sum of the line discounts.
+      - name: net_amount
+        description: Sum of the lines after discount. Excludes shipping.
+      - name: source_total_amount
+        description: "Order total as declared by the web shop, kept to reconcile with total_amount. Empty for marketplace orders, whose export carries no total."
+      - name: units_sold
+        description: "Units, counted as zero when the order was cancelled."
+      - name: net_sales_amount
+        description: "Net amount, counted as zero when the order was cancelled."
