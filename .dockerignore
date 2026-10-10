@@ -1,6 +1,8 @@
 # The Airflow image is built from the repository root. Keep the build context
 # small: without this, Docker would copy the whole data lake into every build.
 data/
+dashboards/
+docs/
 .git/
 .github/
 .env

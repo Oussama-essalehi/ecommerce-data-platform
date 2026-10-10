@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Run by hand from the Actions tab. Also publishes the dbt documentation
+  # site to GitHub Pages (see the publish-docs job).
+  workflow_dispatch:
 
 jobs:
   simulator:
@@ -86,6 +89,42 @@ jobs:
         run: psql -h localhost -U warehouse -d warehouse -v ON_ERROR_STOP=1 -q -f ci/sample_lake.sql
       - name: Build and test the dbt project
         run: dbt build
+      - name: Generate the documentation site
+        run: dbt docs generate --static
+      - name: Check that every published column is documented
+        run: python ci/check_docs.py
+      - name: Keep the documentation site as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dbt-docs
+          path: warehouse/target/static_index.html
+          if-no-files-found: error
+
+  # Publishes the dbt documentation and lineage graph to GitHub Pages. Only
+  # when the workflow is started by hand (Actions > CI > Run workflow), and
+  # Pages must be enabled once: Settings > Pages > Source: GitHub Actions.
+  publish-docs:
+    if: github.event_name == 'workflow_dispatch'
+    needs: warehouse
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dbt-docs
+          path: site
+      - name: Make the single-file site the home page
+        run: mv site/static_index.html site/index.html
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4
 
   orchestration:
     runs-on: ubuntu-latest
