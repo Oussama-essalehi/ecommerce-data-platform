@@ -1,0 +1,12 @@
+# The Airflow image is built from the repository root. Keep the build context
+# small: without this, Docker would copy the whole data lake into every build.
+data/
+.git/
+.github/
+.env
+**/__pycache__/
+**/.pytest_cache/
+**/.venv*/
+warehouse/target/
+warehouse/logs/
+warehouse/dbt_packages/

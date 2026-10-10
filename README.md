@@ -7,7 +7,7 @@ warehouse that feeds dashboards and demand-forecasting features.
 
 **Stack:** Python · Kafka · Spark · Delta Lake · Airflow · dbt · PostgreSQL · Great Expectations · Docker
 
-> **Status:** phases 1 to 5 of 7 are done (source systems, Kafka, the data lake, the warehouse and data quality). See the [roadmap](#roadmap).
+> **Status:** phases 1 to 6 of 7 are done: the pipeline runs end to end and is scheduled by Airflow. See the [roadmap](#roadmap).
 
 ## Architecture
 
@@ -48,15 +48,15 @@ flowchart LR
 | 3 | **Silver and gold** | Typing, deduplication, late and broken events, the two order sources merged into one model; business tables in gold | ✅ |
 | 4 | **Warehouse** | PostgreSQL star schema with dbt: sales fact, customer, product and date dimensions, data marts | ✅ |
 | 5 | **Data quality** | Great Expectations suites and dbt tests for completeness, uniqueness and freshness, with an anomaly log | ✅ |
-| 6 | **Orchestration** | Airflow DAGs for the daily batch, with retries and failure alerts | ⬜ |
+| 6 | **Orchestration** | Airflow DAGs for the daily batch, with retries and failure alerts | ✅ |
 | 7 | **Serving and documentation** | Power BI dashboard, demand-forecast feature table, dbt docs and lineage | ⬜ |
 
 ## Quick start
 
-You need [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker Engine with the Compose plugin), with about 4 GB of memory free. The first build downloads Spark and takes a few minutes.
+You need [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker Engine with the Compose plugin), with about 8 GB of memory available to Docker. The first build downloads Spark and Airflow and takes around ten minutes.
 
 ```bash
-# 1. Start Kafka, the Shop API, the order-event producer and the bronze stream
+# 1. Start everything: sources, Kafka, the bronze stream, the warehouse, Airflow
 docker compose up -d --build
 
 # 2. Write the marketplace CSV exports, from the start date up to yesterday
@@ -85,6 +85,10 @@ Order events need no command for bronze: the `bronze-events` container reads
 Kafka continuously and writes to `bronze.order_events`. Silver and gold are
 batch jobs; run them again whenever you want them to catch up with bronze.
 
+Steps 2 to 7 are what Airflow runs by itself every night. Once you have seen
+them work by hand, open http://localhost:8080, switch on the
+`ecommerce_daily` DAG, and let it take over (see [Orchestration](#orchestration)).
+
 Then look around:
 
 | What | Where |
@@ -95,7 +99,9 @@ Then look around:
 | Marketplace CSV files | `data/landing/marketplace/` |
 | Delta tables | `data/lake/bronze/`, `silver/`, `gold/` |
 | Warehouse (PostgreSQL) | `localhost:5432`, database, user and password `warehouse` |
+| Airflow | http://localhost:8080 |
 | Data-quality report | `data/quality/gx/uncommitted/data_docs/local_site/index.html` |
+| Failure alerts | `data/alerts/alerts.jsonl` |
 | Producer progress | `docker compose logs -f order-producer` |
 
 On its first start the producer replays the whole history into Kafka (a
@@ -506,6 +512,78 @@ lot. So every result is kept, not just the failures:
   the `test_failures` schema: when a total stops matching, the orders at
   fault are in a table, not just counted in a log.
 
+## Orchestration
+
+Airflow runs the batch side of the platform every night. The DAG is in
+[`orchestration/dags/ecommerce_daily.py`](orchestration/dags/ecommerce_daily.py),
+and the Airflow interface at http://localhost:8080.
+
+```mermaid
+flowchart LR
+    BD[business_day] --> W[wait_for_marketplace_export]
+    W --> BM[bronze_marketplace]
+    BA[bronze_api]
+    BM --> S[silver]
+    BA --> S
+    S --> G[gold] --> Q{quality}
+    Q --> WL[warehouse_load] --> D[dbt_build] --> F[dbt_source_freshness]
+```
+
+| Task | What it does |
+| :-- | :-- |
+| `business_day` | Works out the day to load: the day before the run, in French time |
+| `wait_for_marketplace_export` | Waits for the partner's CSV file of that day |
+| `bronze_marketplace`, `bronze_api` | Load the file and the API changes into bronze, side by side |
+| `silver`, `gold` | Rebuild the cleaned and the business tables |
+| `quality` | Runs the Great Expectations checks. An error stops the run here |
+| `warehouse_load`, `dbt_build` | Load PostgreSQL, build and test the star schema |
+| `dbt_source_freshness` | Confirms the warehouse was just fed |
+
+The run starts at 03:00 Paris time. To start one right away:
+
+```bash
+docker compose exec airflow airflow dags unpause ecommerce_daily
+docker compose exec airflow airflow dags trigger ecommerce_daily
+```
+
+How the DAG deals with what goes wrong:
+
+- **A source is late.** The sensor checks for the marketplace file every
+  minute for two hours, without holding a worker in between. If the file
+  never comes, the run fails rather than publish a day without marketplace
+  sales.
+- **A step fails for a passing reason** (the API is down, a container
+  restarts). Loading steps are retried twice, with a pause that grows each
+  time. They
+  are idempotent, so a retry can never load the same data twice.
+- **The data is wrong.** The quality gate and the dbt tests are not retried:
+  the same data would fail the same way. The run stops, and the warehouse
+  keeps yesterday's data instead of receiving bad data.
+- **Someone has to know.** When a task has used up its retries, an alert
+  goes out with the task, the number of attempts, the error and a link to
+  the log. It is always written to `data/alerts/alerts.jsonl`, and posted to
+  a chat webhook (Slack, Teams, Mattermost) if `ALERT_WEBHOOK_URL` is set
+  in `.env`.
+- **A day has to be redone.** Trigger the DAG with a `business_day`
+  parameter to reprocess that day.
+
+What is not in the DAG, and why:
+
+- **Order events.** They are ingested continuously by the `bronze-events`
+  streaming service. Airflow orchestrates batch work; a stream that never
+  ends is a service, not a task.
+- **The partner's export.** The `marketplace-exporter` container plays the
+  partner and drops each day's file after midnight. The pipeline only waits
+  for it, as it would for a real partner.
+
+Airflow launches the same commands as the ones typed by hand. The Spark jobs
+and dbt each run in a virtual environment of their own inside the Airflow
+image, so their dependencies never have to agree with Airflow's.
+
+The setup is sized for a laptop: one container runs the scheduler, the DAG
+processor and the web interface, and no login is asked. A production
+deployment would run these components separately, with authentication.
+
 ## Data defects, injected on purpose
 
 Clean sources would leave nothing for the quality checks to do. The simulator
@@ -550,6 +628,8 @@ Copy `.env.example` to `.env` to change the defaults.
 | `SPARK_DRIVER_MEMORY` | `2g` | Memory given to each Spark job |
 | `WAREHOUSE_PASSWORD` | `warehouse` | Password of the warehouse database |
 | `WAREHOUSE_HOST_PORT` | `5432` | Port of the warehouse on your machine; change it if another PostgreSQL already uses 5432 |
+| `AIRFLOW_HOST_PORT` | `8080` | Port of the Airflow interface on your machine |
+| `ALERT_WEBHOOK_URL` | empty | Chat webhook that receives failure alerts |
 
 ## Tests
 
@@ -561,6 +641,13 @@ docker compose run --rm --no-deps --entrypoint python spark -m pytest
 
 # Warehouse: dbt builds every model and runs its tests
 docker compose run --rm dbt build
+
+# Orchestration: the DAG loads, runs in the right order, retries and alerts as intended
+cd orchestration
+pip install -r requirements-dev.txt \
+  --constraint https://raw.githubusercontent.com/apache/airflow/constraints-3.3.2/constraints-3.12.txt
+python -m pytest
+cd ..
 
 # Simulator: determinism, referential integrity, amounts, pagination, checkpointing
 cd sources
@@ -576,7 +663,7 @@ the project's warehouse without touching its data.
 
 ```
 .
-├── docker-compose.yml        Kafka, Kafka UI, Shop API, event producer, bronze stream, warehouse
+├── docker-compose.yml        Every service: sources, Kafka, bronze stream, warehouse, Airflow
 ├── sources/
 │   ├── shop_sim/             The simulated source systems
 │   │   ├── world.py          Customers and products, with their history
@@ -619,5 +706,11 @@ the project's warehouse without touching its data.
 │   ├── tests/                Reconciliation and monitoring tests, generic tests
 │   ├── macros/               Surrogate keys, schema naming
 │   └── ci/                   Sample data used by CI
+├── orchestration/
+│   ├── dags/
+│   │   ├── ecommerce_daily.py    The daily batch
+│   │   └── common/alerting.py    Failure alerts
+│   ├── tests/
+│   └── Dockerfile            Airflow, with the Spark jobs and dbt in their own environments
 └── data/                     Generated files and the lake, not versioned
 ```

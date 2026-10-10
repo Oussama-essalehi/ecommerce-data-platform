@@ -1,0 +1,5 @@
+# Install with Airflow's own constraint file, which pins every dependency to
+# the versions this Airflow release was tested with:
+#   pip install -r requirements.txt \
+#     --constraint https://raw.githubusercontent.com/apache/airflow/constraints-3.3.2/constraints-3.12.txt
+apache-airflow[postgres]==3.3.2

@@ -86,3 +86,20 @@ jobs:
         run: psql -h localhost -U warehouse -d warehouse -v ON_ERROR_STOP=1 -q -f ci/sample_lake.sql
       - name: Build and test the dbt project
         run: dbt build
+
+  orchestration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: orchestration/requirements.txt
+      - name: Install Airflow with its official constraints
+        run: >
+          pip install -r orchestration/requirements-dev.txt
+          --constraint https://raw.githubusercontent.com/apache/airflow/constraints-3.3.2/constraints-3.12.txt
+      - name: Check the DAGs and the alerting
+        working-directory: orchestration
+        run: python -m pytest -q

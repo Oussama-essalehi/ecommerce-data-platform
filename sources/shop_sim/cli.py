@@ -6,6 +6,7 @@ import argparse
 import logging
 import signal
 import sys
+import time
 from collections import Counter
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -32,18 +33,48 @@ def cmd_api(args: argparse.Namespace, settings: Settings) -> int:
     return 0
 
 
-def cmd_export_csv(args: argparse.Namespace, settings: Settings) -> int:
+def _export_once(args: argparse.Namespace, settings: Settings, book: OrderBook) -> int:
+    """Write the missing export files up to yesterday. Returns how many were written."""
     start = args.start or settings.start_date
     end = args.until or _yesterday()
     out_dir = args.out or settings.landing_dir
-    book = OrderBook(World(settings))
     results = export_range(book, start, end, out_dir, force=args.force)
     written = [r for r in results if r.written]
-    print(
-        f"{len(written)} files written to {out_dir} "
-        f"({sum(r.rows for r in written):,} rows), "
-        f"{len(results) - len(written)} already there"
-    )
+    if written or not args.watch:
+        print(
+            f"{len(written)} files written to {out_dir} "
+            f"({sum(r.rows for r in written):,} rows), "
+            f"{len(results) - len(written)} already there",
+            flush=True,
+        )
+    return len(written)
+
+
+def cmd_export_csv(args: argparse.Namespace, settings: Settings) -> int:
+    book = OrderBook(World(settings))
+    if not args.watch:
+        _export_once(args, settings, book)
+        return 0
+
+    # Stand-in for the partner's nightly job: each time a day ends, its file
+    # appears. Checking every few minutes is enough, and writing is
+    # idempotent, so a restart never duplicates or skips a file.
+    stopping = False
+
+    def stop(*_: object) -> None:
+        nonlocal stopping
+        stopping = True
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+    print(f"watching: a new export is written every day, checked every {args.interval:g}s",
+          flush=True)
+    while not stopping:
+        _export_once(args, settings, book)
+        waited = 0.0
+        while waited < args.interval and not stopping:
+            time.sleep(min(1.0, args.interval - waited))
+            waited += 1.0
     return 0
 
 
@@ -124,6 +155,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="last day, YYYY-MM-DD (default: yesterday)")
     export.add_argument("--out", type=Path, help="output folder (default: SIM_LANDING_DIR)")
     export.add_argument("--force", action="store_true", help="overwrite existing files")
+    export.add_argument("--watch", action="store_true",
+                        help="keep running and write each new day's file as it becomes due")
+    export.add_argument("--interval", type=float, default=300.0,
+                        help="seconds between two checks with --watch (default: 300)")
     export.set_defaults(handler=cmd_export_csv)
 
     produce = commands.add_parser("produce", help="publish web shop order events")
