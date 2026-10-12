@@ -50,6 +50,13 @@ flowchart LR
 
 ## Dashboard
 
+**Live web dashboard: https://oussama-essalehi.github.io/ecommerce-data-platform/**
+
+A static web version of the report, in French ([`dashboards/web`](dashboards/web)): sales, customers,
+operations and data quality, with date, channel, category and segment filters computed in the
+browser. Its data is one file exported from the warehouse by `make web-data`, with the same
+definitions as the Power BI measures. GitHub Pages serves it with the dbt docs under `/dbt-docs/`.
+
 A Power BI report ([`rapport.pbix`](rapport.pbix)) reads the star schema.
 
 | Sales overview | Customers |
@@ -119,7 +126,7 @@ sources/         Simulated source systems: API, CSV exports, Kafka producer
 pipelines/       Spark jobs: bronze, silver, gold, quality checks, warehouse load
 warehouse/       dbt project: staging, star schema, marts, tests
 orchestration/   Airflow DAG and alerting
-dashboards/      Power BI measures, check figures, theme, build guide
+dashboards/      Power BI measures, check figures, theme, build guide; web/ the web dashboard
 docs/images/     Images used in this README
 ```
 

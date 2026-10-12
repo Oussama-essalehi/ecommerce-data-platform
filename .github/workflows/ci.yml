@@ -4,8 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
-  # Run by hand from the Actions tab. Also publishes the dbt documentation
-  # site to GitHub Pages (see the publish-docs job).
+  # Run by hand from the Actions tab. Also publishes the web dashboard and
+  # the dbt documentation site to GitHub Pages (see the publish-docs job).
   workflow_dispatch:
 
 jobs:
@@ -114,12 +114,16 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: dbt-docs
-          path: site
-      - name: Make the single-file site the home page
-        run: mv site/static_index.html site/index.html
+          path: site/dbt-docs
+      - name: Put the web dashboard at the root and the dbt docs under dbt-docs/
+        run: |
+          mv site/dbt-docs/static_index.html site/dbt-docs/index.html
+          cp dashboards/web/index.html site/
+          cp -r dashboards/web/assets site/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

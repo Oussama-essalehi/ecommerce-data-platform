@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="fr" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Plateforme Data E-commerce · Oussama Essalehi</title>
+  <meta name="description" content="Tableau de bord ventes, clients, opérations et qualité des données d'une plateforme de données de bout en bout : Kafka, Spark, Delta Lake, Airflow, dbt et PostgreSQL.">
+  <meta name="author" content="Oussama Essalehi">
+  <meta property="og:title" content="Plateforme Data E-commerce · Oussama Essalehi">
+  <meta property="og:description" content="Tableau de bord interactif sur une plateforme de données de bout en bout : Kafka, Spark, Delta Lake, Airflow, dbt, PostgreSQL.">
+  <meta property="og:locale" content="fr_FR">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='4' y='5' width='24' height='6' rx='2' fill='%23d4a017'/%3E%3Crect x='4' y='13' width='24' height='6' rx='2' fill='%238d97a5'/%3E%3Crect x='4' y='21' width='24' height='6' rx='2' fill='%23b0703c'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="assets/styles.css">
+  <script>
+    // Clair par défaut ; un visiteur qui a choisi le thème sombre le garde.
+    try { if (localStorage.getItem('theme') === 'dark') document.documentElement.dataset.theme = 'dark'; } catch (e) {}
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap">
+      <div class="topbar-row">
+        <div class="brand">
+          <svg class="brand-mark" width="32" height="32" viewBox="0 0 32 32" aria-hidden="true">
+            <rect x="4" y="5" width="24" height="6" rx="2" fill="var(--gold)"></rect>
+            <rect x="4" y="13" width="24" height="6" rx="2" fill="var(--silver)"></rect>
+            <rect x="4" y="21" width="24" height="6" rx="2" fill="var(--bronze)"></rect>
+          </svg>
+          <div class="brand-text">
+            <h1 class="brand-title">Plateforme Data E-commerce</h1>
+            <p class="brand-sub">De l'événement brut au tableau de bord · une boutique en ligne française fictive</p>
+          </div>
+        </div>
+        <div class="top-actions">
+          <span class="badge" title="Générées par le simulateur du projet : aucun vrai client n'apparaît">Données synthétiques</span>
+          <a class="btn" href="https://github.com/Oussama-essalehi/ecommerce-data-platform" target="_blank" rel="noopener" aria-label="Code source sur GitHub">
+            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+            <span class="btn-label">Code source</span>
+          </a>
+          <button class="btn btn-icon" id="theme" type="button" aria-label="Passer du thème clair au thème sombre">
+            <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.39 5.39 0 0 1-4.4 2.26 5.4 5.4 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z"/></svg>
+          </button>
+        </div>
+      </div>
+      <nav class="tabs" role="tablist" aria-label="Pages du tableau de bord">
+        <button class="tab" role="tab" id="tab-sales" data-page="sales" aria-controls="sales">Ventes</button>
+        <button class="tab" role="tab" id="tab-customers" data-page="customers" aria-controls="customers">Clients</button>
+        <button class="tab" role="tab" id="tab-operations" data-page="operations" aria-controls="operations">Opérations</button>
+        <button class="tab" role="tab" id="tab-quality" data-page="quality" aria-controls="quality">Qualité des données</button>
+        <button class="tab" role="tab" id="tab-project" data-page="project" aria-controls="project">À propos du projet</button>
+      </nav>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <div class="filters" id="filters">
+      <div class="field" data-for="sales operations">
+        <span class="field-label" id="lbl-period">Période</span>
+        <div class="seg" id="presets" role="group" aria-labelledby="lbl-period"></div>
+      </div>
+      <div class="field" data-for="sales operations">
+        <span class="field-label">Dates personnalisées</span>
+        <div class="dates">
+          <input class="date" type="date" id="from" aria-label="Du">
+          <span>au</span>
+          <input class="date" type="date" id="to" aria-label="Au">
+        </div>
+      </div>
+      <div class="field" data-for="sales operations">
+        <label class="field-label" for="channel">Canal</label>
+        <select class="select" id="channel"></select>
+      </div>
+      <div class="field" data-for="sales">
+        <label class="field-label" for="category">Catégorie</label>
+        <select class="select" id="category"></select>
+      </div>
+      <div class="field" data-for="customers">
+        <span class="field-label" id="lbl-segment">Segment client</span>
+        <div class="seg" id="segments" role="group" aria-labelledby="lbl-segment"></div>
+      </div>
+      <button class="link-btn" id="reset" type="button" data-for="sales operations customers">Réinitialiser les filtres</button>
+    </div>
+  </div>
+
+  <main class="wrap">
+    <!-- Ventes -->
+    <section class="page" id="sales" role="tabpanel" aria-labelledby="tab-sales">
+      <div class="page-head">
+        <p class="takeaway" id="sales-takeaway"></p>
+        <p class="scope" id="sales-scope"></p>
+      </div>
+      <div class="kpis" id="sales-kpis"></div>
+      <div class="grid">
+        <article class="panel span-12">
+          <div class="panel-head">
+            <div>
+              <h2 class="panel-title">Ventes nettes par jour</h2>
+              <p class="panel-note">Avec la moyenne sur 7 jours. Les zones colorées sont les temps forts commerciaux.</p>
+            </div>
+            <div class="legend" id="lg-daily"></div>
+          </div>
+          <div class="chart tall" id="ch-daily"></div>
+        </article>
+        <article class="panel span-7">
+          <div>
+            <h2 class="panel-title">Ventes nettes par mois</h2>
+            <p class="panel-note">Les barres plus claires sont des mois en partie hors de la période.</p>
+          </div>
+          <div class="chart" id="ch-monthly"></div>
+        </article>
+        <article class="panel span-5">
+          <div>
+            <h2 class="panel-title">Ventes nettes par catégorie</h2>
+            <p class="panel-note">Sélectionnez une catégorie pour filtrer la page.</p>
+          </div>
+          <div class="chart" id="ch-category"></div>
+        </article>
+        <article class="panel span-5">
+          <div>
+            <h2 class="panel-title">Répartition par canal</h2>
+            <p class="panel-note">Part des ventes nettes. Sélectionnez un canal pour filtrer la page.</p>
+          </div>
+          <div class="chart" id="ch-channel" style="min-height: 250px"></div>
+          <div class="mix" id="mix-channel"></div>
+        </article>
+        <article class="panel span-7">
+          <div>
+            <h2 class="panel-title">Top 10 des produits</h2>
+            <p class="panel-note">Par ventes nettes, pour la période, le canal et la catégorie choisis.</p>
+          </div>
+          <div class="table-wrap">
+            <table class="data" id="tb-products">
+              <thead><tr><th class="rank">#</th><th>Produit</th><th class="n">Ventes nettes</th><th class="n">Unités</th></tr></thead>
+              <tbody></tbody>
+              <tfoot></tfoot>
+            </table>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- Clients -->
+    <section class="page" id="customers" role="tabpanel" aria-labelledby="tab-customers" hidden>
+      <div class="page-head">
+        <p class="takeaway" id="customers-takeaway"></p>
+        <p class="scope">Chiffres cumulés par compte client, toutes dates confondues</p>
+      </div>
+      <div class="kpis" id="customers-kpis"></div>
+      <div class="grid">
+        <article class="panel span-7">
+          <div>
+            <h2 class="panel-title">Segments clients</h2>
+            <p class="panel-note">Ponctuels : 1 commande. Réguliers : 2 à 4. Fidèles : 5 ou plus. Sélectionnez une ligne pour filtrer la page.</p>
+          </div>
+          <div class="table-wrap">
+            <table class="data" id="tb-segments">
+              <thead><tr><th>Segment</th><th class="n">Clients</th><th class="n">% des clients</th><th class="n">Dépense cumulée</th><th class="n">% de la dépense</th><th class="n">Par acheteur</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </article>
+        <article class="panel span-5">
+          <div>
+            <h2 class="panel-title">Jours depuis la dernière commande</h2>
+            <p class="panel-note">Acheteurs par tranches de 30 jours, au dernier jour des données.</p>
+          </div>
+          <div class="chart" id="ch-recency"></div>
+        </article>
+        <article class="panel span-5">
+          <div>
+            <h2 class="panel-title">Top 10 des départements</h2>
+            <p class="panel-note">Ventes nettes selon le département du client.</p>
+          </div>
+          <div class="chart" id="ch-departments"></div>
+        </article>
+        <article class="panel span-7">
+          <div>
+            <h2 class="panel-title">Top 20 des clients</h2>
+            <p class="panel-note">Par dépense cumulée. Les noms sont générés.</p>
+          </div>
+          <div class="table-wrap scroll">
+            <table class="data" id="tb-customers">
+              <thead><tr><th class="rank">#</th><th>Client</th><th>Ville</th><th>Segment</th><th class="n">Commandes</th><th class="n">Dépense cumulée</th><th class="n">Dernière commande</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- Opérations -->
+    <section class="page" id="operations" role="tabpanel" aria-labelledby="tab-operations" hidden>
+      <div class="page-head">
+        <p class="takeaway" id="operations-takeaway"></p>
+        <p class="scope" id="operations-scope"></p>
+      </div>
+      <div class="kpis" id="operations-kpis"></div>
+      <div class="grid">
+        <article class="panel span-5">
+          <div>
+            <h2 class="panel-title">Commandes par statut</h2>
+            <p class="panel-note">Statut actuel des commandes passées sur la période, dans l'ordre du cycle de vie.</p>
+          </div>
+          <div class="chart" id="ch-status"></div>
+        </article>
+        <article class="panel span-7">
+          <div>
+            <h2 class="panel-title">Commandes par moyen de paiement</h2>
+            <p class="panel-note">Commandes passées, tous statuts.</p>
+          </div>
+          <div class="chart" id="ch-payment"></div>
+        </article>
+        <article class="panel span-7">
+          <div class="panel-head">
+            <div>
+              <h2 class="panel-title">Taux d'annulation et de retour par mois</h2>
+              <p class="panel-note">Les retours arrivent après la livraison : le dernier mois est toujours bas.</p>
+            </div>
+            <div class="legend" id="lg-rates"></div>
+          </div>
+          <div class="chart" id="ch-rates"></div>
+        </article>
+        <article class="panel span-5">
+          <div>
+            <h2 class="panel-title">Délai moyen de livraison</h2>
+            <p class="panel-note">Commandes livrées, par mois de commande.</p>
+          </div>
+          <div class="chart" id="ch-delivery"></div>
+        </article>
+        <article class="panel span-12">
+          <div>
+            <h2 class="panel-title">Commandes par canal</h2>
+            <p class="panel-note">Le montant facturé inclut la livraison ; les commandes annulées comptent pour zéro. Sélectionnez une ligne pour filtrer la page.</p>
+          </div>
+          <div class="table-wrap">
+            <table class="data" id="tb-channels">
+              <thead><tr><th>Canal</th><th class="n">Commandes passées</th><th class="n">Montant facturé</th><th class="n">Valeur moyenne</th><th class="n">Frais de livraison</th><th class="n">Taux d'annulation</th><th class="n">Taux de retour</th><th class="n">Jours de livraison</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- Qualité des données -->
+    <section class="page" id="quality" role="tabpanel" aria-labelledby="tab-quality" hidden>
+      <div class="banner" id="quality-banner">
+        <div class="banner-icon" id="quality-icon"></div>
+        <div>
+          <p class="banner-title" id="quality-title"></p>
+          <p class="banner-sub" id="quality-sub"></p>
+        </div>
+      </div>
+      <div class="kpis" id="quality-kpis"></div>
+      <div class="grid">
+        <article class="panel span-7">
+          <div>
+            <h2 class="panel-title">Contrôles par couche du lac et dimension qualité</h2>
+            <p class="panel-note">Suites Great Expectations exécutées sur les tables Delta, avant tout chargement dans l'entrepôt.</p>
+          </div>
+          <div class="chart" id="ch-heatmap" style="min-height: 150px"></div>
+        </article>
+        <article class="panel span-5">
+          <div class="panel-head">
+            <div>
+              <h2 class="panel-title">Enregistrements rejetés par motif</h2>
+              <p class="panel-note">Mis de côté en silver, jamais supprimés en silence.</p>
+            </div>
+            <div class="legend" id="lg-rejects"></div>
+          </div>
+          <div class="chart" id="ch-rejects" style="min-height: 140px"></div>
+        </article>
+        <article class="panel span-12">
+          <div class="panel-head">
+            <div>
+              <h2 class="panel-title">Tous les contrôles de la dernière exécution</h2>
+              <p class="panel-note" id="checks-count"></p>
+            </div>
+            <div class="table-tools">
+              <div class="seg" id="check-status" role="group" aria-label="Filtrer par statut"></div>
+              <input class="search" id="check-search" type="search" placeholder="Rechercher une table ou un contrôle" aria-label="Rechercher un contrôle">
+            </div>
+          </div>
+          <div class="table-wrap scroll">
+            <table class="data" id="tb-checks">
+              <thead><tr><th>Statut</th><th>Table</th><th>Contrôle</th><th>Dimension</th><th>Sévérité</th><th>Ce qui est vérifié</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- À propos du projet -->
+    <section class="page" id="project" role="tabpanel" aria-labelledby="tab-project" hidden>
+      <div class="about-intro">
+        <article class="panel prose">
+          <h2>Des événements bruts à un schéma en étoile testé</h2>
+          <p>Ce tableau de bord est la dernière étape d'une plateforme de données construite de bout en bout pour une boutique en ligne française fictive. Les commandes arrivent de trois systèmes sources, en batch et en temps réel. Elles traversent un Delta Lake en trois couches, puis rejoignent un schéma en étoile PostgreSQL modélisé avec dbt.</p>
+          <p>Toute la plateforme tourne sur un ordinateur portable avec Docker Compose, et Airflow la reconstruit chaque nuit. Chaque chiffre de ces pages est calculé depuis cet entrepôt, avec les définitions du rapport Power BI du projet.</p>
+          <div class="links">
+            <a class="btn" href="https://github.com/Oussama-essalehi/ecommerce-data-platform" target="_blank" rel="noopener">Code source sur GitHub</a>
+            <a class="btn" href="dbt-docs/" target="_blank" rel="noopener">Documentation et lignage de l'entrepôt</a>
+          </div>
+        </article>
+        <div class="facts">
+          <div class="fact"><b>3</b><span>systèmes sources : API REST, fichiers CSV quotidiens, événements Kafka</span></div>
+          <div class="fact"><b id="fact-checks">88</b><span>contrôles qualité sur le lac, à chaque exécution</span></div>
+          <div class="fact"><b>83</b><span>tests dbt sur les modèles de l'entrepôt</span></div>
+          <div class="fact"><b>154</b><span>tests unitaires Python, lancés en CI à chaque push</span></div>
+        </div>
+      </div>
+
+      <article class="panel">
+        <div>
+          <h2 class="panel-title">Architecture</h2>
+          <p class="panel-note">Des systèmes sources jusqu'à cette page.</p>
+        </div>
+        <div class="flow">
+          <div class="stage">
+            <span class="stage-kicker">Sources</span>
+            <span class="stage-title">Trois systèmes de la boutique</span>
+            <ul><li>API boutique : clients, produits</li><li>Marketplace : export CSV quotidien</li><li>Boutique web : événements de commande</li></ul>
+            <div class="tech"><span class="tag">FastAPI</span><span class="tag">Kafka</span></div>
+          </div>
+          <div class="arrow" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8h9m-3-4 4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <div class="stage">
+            <span class="stage-kicker"><i class="dot" style="background: var(--bronze)"></i>Bronze</span>
+            <span class="stage-title">Données brutes, telles que reçues</span>
+            <ul><li>Spark en batch pour l'API et les CSV</li><li>Structured Streaming depuis Kafka</li></ul>
+            <div class="tech"><span class="tag">Spark</span><span class="tag">Delta Lake</span></div>
+          </div>
+          <div class="arrow" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8h9m-3-4 4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <div class="stage">
+            <span class="stage-kicker"><i class="dot" style="background: var(--silver)"></i>Silver</span>
+            <span class="stage-title">Nettoyées et réconciliées</span>
+            <ul><li>Dédoublonnées, typées, événements tardifs fusionnés</li><li>Rejets conservés avec leur motif</li></ul>
+            <div class="tech"><span class="tag">Spark</span><span class="tag">Great Expectations</span></div>
+          </div>
+          <div class="arrow" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8h9m-3-4 4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <div class="stage">
+            <span class="stage-kicker"><i class="dot" style="background: var(--gold)"></i>Gold</span>
+            <span class="stage-title">Tables métier</span>
+            <ul><li>Commandes, lignes, clients, produits</li><li>Contrôle qualité avant l'entrepôt</li></ul>
+            <div class="tech"><span class="tag">Spark</span><span class="tag">Delta Lake</span></div>
+          </div>
+          <div class="arrow" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8h9m-3-4 4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <div class="stage">
+            <span class="stage-kicker">Entrepôt</span>
+            <span class="stage-title">Schéma en étoile</span>
+            <ul><li>2 faits, 4 dimensions, data marts</li><li>Clés hachées, membres « Inconnu »</li></ul>
+            <div class="tech"><span class="tag">PostgreSQL</span><span class="tag">dbt</span></div>
+          </div>
+          <div class="arrow" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8h9m-3-4 4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <div class="stage">
+            <span class="stage-kicker">Restitution</span>
+            <span class="stage-title">Analyse</span>
+            <ul><li>Rapport Power BI</li><li>Ce tableau de bord web</li><li>Variables de prévision de la demande</li></ul>
+            <div class="tech"><span class="tag">Power BI</span><span class="tag">D3.js</span></div>
+          </div>
+        </div>
+        <div class="flow-foot">
+          <span><b>Orchestration</b> · Airflow, chaque nuit, avec un capteur sur la source en retard, des relances et des alertes</span>
+          <span><b>Infrastructure</b> · Docker Compose, CI sur GitHub Actions</span>
+        </div>
+      </article>
+
+      <div class="grid">
+        <article class="panel span-6">
+          <h2 class="panel-title">Comment les chiffres sont vérifiés</h2>
+          <ul class="checklist">
+            <li><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Les indicateurs reprennent les 34 mesures DAX du rapport Power BI, consignées dans <code>dashboards/measures.dax</code>.</span></li>
+            <li><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Une seule requête SQL exporte l'entrepôt, agrégé par jour : toute période donne des totaux exacts, commandes distinctes comprises.</span></li>
+            <li><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Les totaux sont rapprochés du rapport Power BI et de <code>dashboards/check_figures.sql</code>.</span></li>
+            <li><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>La page qualité lit les résultats de contrôle et l'historique des rejets produits par le pipeline lui-même.</span></li>
+          </ul>
+        </article>
+        <article class="panel span-6">
+          <h2 class="panel-title">Choix de conception</h2>
+          <ul class="checklist">
+            <li><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Chargements idempotents : un jour peut être rechargé ou une tâche relancée sans créer de doublons.</span></li>
+            <li><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Les données invalides s'arrêtent avant l'entrepôt, qui garde les données de la veille.</span></li>
+            <li><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Les sources se trompent exprès : doublons, événements tardifs, JSON cassé et clés manquantes, à des taux connus.</span></li>
+            <li><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Un site statique sans serveur : les données tiennent dans un fichier, et la page les filtre dans le navigateur.</span></li>
+          </ul>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <span>Réalisé par Oussama Essalehi · <a href="https://github.com/Oussama-essalehi/ecommerce-data-platform" target="_blank" rel="noopener">ecommerce-data-platform</a></span>
+      <span id="freshness"></span>
+    </div>
+  </footer>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+  <script src="assets/dashboard-data.js"></script>
+  <script src="assets/charts.js"></script>
+  <script src="assets/app.js"></script>
+</body>
+</html>

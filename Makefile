@@ -36,6 +36,9 @@ warehouse: ## Load gold into PostgreSQL, then build and test the star schema wit
 
 all: lake quality warehouse ## Run the whole pipeline, from the sources to the marts
 
+web-data: ## Export the warehouse figures used by the web dashboard (dashboards/web)
+	bash dashboards/web/export_data.sh
+
 docs: ## Generate and serve the warehouse documentation and lineage on http://localhost:8081 (Ctrl+C to stop)
 	docker compose run --rm --service-ports dbt-docs
 
@@ -62,5 +65,5 @@ test: ## Run the Spark job tests inside the pipelines image
 help:
 	@grep -E "^[a-z]+:.*##" Makefile | sed "s/:.*## /\t/"
 
-.PHONY: up down reset csv summary bronze silver gold lake quality warehouse all docs figures trigger psql status logs test help
+.PHONY: up down reset csv summary bronze silver gold lake quality warehouse all web-data docs figures trigger psql status logs test help
 .DEFAULT_GOAL := help
