@@ -7,6 +7,8 @@ Power BI report and a demand-forecast feature table.
 
 **Stack:** Python · Kafka · Spark · Delta Lake · Airflow · dbt · PostgreSQL · Great Expectations · Docker · Power BI
 
+**Live demo:** https://ecommerce-data-platform-seven.vercel.app/
+
 ## What it does
 
 - **Ingests three sources** into Delta tables with Spark: a REST API and daily CSV files in batch, Kafka order events in streaming
@@ -50,7 +52,8 @@ flowchart LR
 
 ## Dashboard
 
-**Live web dashboard: https://oussama-essalehi.github.io/ecommerce-data-platform/**
+**Live web dashboard: https://ecommerce-data-platform-seven.vercel.app/**
+(also on GitHub Pages: https://oussama-essalehi.github.io/ecommerce-data-platform/)
 
 A static web version of the report, in French ([`dashboards/web`](dashboards/web)): sales, customers,
 operations and data quality, with date, channel, category and segment filters computed in the
